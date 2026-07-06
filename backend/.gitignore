@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Env
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Postgres CA certificate
+dashboard_test_pg-ca-certificate.pem
+
+# LevelDB runtime data
+data/
+data-submissions/
+
+# Build output
+dist/
+build/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.sw?
