@@ -9,9 +9,6 @@
  */
 
 import express from 'express';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import fs from 'fs/promises';
 import { body, validationResult } from 'express-validator';
 import { v4 as uuidv4 } from 'uuid';
 import { getSubmission, listSubmissions, saveSubmission, removeSubmission } from '../db/submissions.js';
@@ -23,14 +20,6 @@ import {
   findConflict,
   findSimilarByTitle,
 } from '../utils/duplicateDetection.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Legacy file storage root — newer submissions share data via an external link,
-// but older submissions may still have files on disk that we clean up on delete.
-const DATA_SUBMISSIONS_DIR = process.env.DATA_SUBMISSIONS_DIR
-  || path.join(__dirname, '../../data-submissions');
 
 // Curation team account that submitters must grant data access to.
 export const CURATION_EMAIL = 'cdsicuration@mskcc.org';
@@ -706,17 +695,6 @@ router.delete('/:id',
 
       // Delete from database
       await removeSubmission(req.params.id);
-      
-      // Delete associated files for legacy submissions that uploaded attachments
-      if (submission.hasAttachments) {
-        const submissionDir = path.join(DATA_SUBMISSIONS_DIR, req.params.id);
-        try {
-          await fs.rm(submissionDir, { recursive: true, force: true });
-          console.log(`🗑️  Deleted files for submission: ${req.params.id}`);
-        } catch (error) {
-          console.error(`⚠️  Failed to delete files for ${req.params.id}:`, error);
-        }
-      }
 
       console.log(`✅ Submission deleted: ${req.params.id}`);
       

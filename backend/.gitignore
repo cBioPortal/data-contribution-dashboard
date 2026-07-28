@@ -10,7 +10,8 @@ node_modules/
 # Postgres CA certificate
 *.pem
 
-# Runtime data — legacy submission attachments (see DATA_SUBMISSIONS_DIR)
+# Runtime data (legacy — the upload feature and its storage are both gone;
+# kept as a guard so stray local dirs are never committed)
 data/
 data-submissions/
 
