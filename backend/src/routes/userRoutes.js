@@ -162,6 +162,15 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Delete user error:', error);
 
+    // restrict_violation (ON DELETE RESTRICT) / foreign_key_violation:
+    // the user still owns submissions.
+    if (error.code === '23001' || error.code === '23503') {
+      return res.status(409).json({
+        status: 'error',
+        message: 'Cannot delete a user who still has submissions. Reassign or remove them first.'
+      });
+    }
+
     res.status(500).json({
       status: 'error',
       message: 'Failed to delete user'

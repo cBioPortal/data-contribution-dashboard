@@ -93,9 +93,3 @@ npm run dev
 - Login page: http://localhost:8080/login
 - Backend API: http://localhost:5001
 
-### Migrating from the old LevelDB store (one time, optional)
-If you have existing data in the legacy LevelDB store, copy it into Postgres:
-```bash
-cd backend
-npm run migrate:pg
-```

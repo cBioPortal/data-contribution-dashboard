@@ -45,3 +45,15 @@ CREATE TABLE IF NOT EXISTS submissions (
 CREATE INDEX IF NOT EXISTS submissions_user_id_idx ON submissions (user_id);
 CREATE INDEX IF NOT EXISTS submissions_status_idx  ON submissions (status);
 CREATE INDEX IF NOT EXISTS submissions_pubtype_idx ON submissions (publication_type);
+
+-- A submission's owner must exist. RESTRICT (not CASCADE) so deleting a user
+-- who still has submissions fails loudly rather than destroying curation work;
+-- the API surfaces this as a 409. NULL user_id is still permitted.
+-- Postgres has no ADD CONSTRAINT IF NOT EXISTS, hence the DO block.
+DO $$ BEGIN
+  ALTER TABLE submissions
+    ADD CONSTRAINT submissions_user_id_fkey
+    FOREIGN KEY (user_id) REFERENCES users (id)
+    ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
