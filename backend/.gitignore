@@ -10,9 +10,12 @@ node_modules/
 # Postgres CA certificate
 *.pem
 
-# LevelDB runtime data
+# Runtime data — legacy submission attachments (see DATA_SUBMISSIONS_DIR)
 data/
 data-submissions/
+
+# Guard against a stray `cd backend` inside backend/ recreating a nested copy
+backend/
 
 # Build output
 dist/
