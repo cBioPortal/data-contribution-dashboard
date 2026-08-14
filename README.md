@@ -129,9 +129,13 @@ Both services ship as container images, published to the DockerHub repo
 | Frontend (nginx + SPA) | `:latest-frontend`, `:<short-sha>-frontend` | 8080 | `GET /healthz` |
 
 `.github/workflows/docker_ci.yml` builds and pushes both on every push to `main`,
-and on demand via **workflow_dispatch** with a `ref` input. Images are multi-arch
-(`linux/amd64`, `linux/arm64`). Deployments should reference the immutable
-`<short-sha>` tag — rollouts against a moving `latest` don't reliably restart pods.
+and on demand via **workflow_dispatch** with a `ref` input. Deployments should
+reference the immutable `<short-sha>` tag — rollouts against a moving `latest` don't
+reliably restart pods.
+
+Images are multi-arch (`linux/amd64`, `linux/arm64`). **Keep `linux/arm64`**: the
+`curation` EKS nodegroup these run on is Graviton (`t4g.medium`,
+`BOTTLEROCKET_ARM_64`), so an amd64-only image would fail with `exec format error`.
 
 ### Building and running locally
 

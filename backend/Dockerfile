@@ -23,7 +23,10 @@ COPY package.json ./
 COPY src ./src
 COPY scripts ./scripts
 
-USER node
+# Numeric on purpose: Kubernetes cannot resolve a username to a UID, so a pod
+# with runAsNonRoot rejects an image whose USER is a name ("cannot verify user
+# is non-root"). 1000:1000 is the `node` user in node:20-alpine.
+USER 1000:1000
 EXPOSE 5001
 
 # Liveness/readiness probe target: GET /api/health
