@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log*
+*.log
+
+# Never bake secrets or a developer's local Postgres CA cert into the image —
+# PGSSLROOTCERT resolves relative to this directory (src/db/index.js).
+.env
+.env.*
+*.pem
+
+# LevelDB-era runtime data
+data/
+data-submissions/
+
+.DS_Store

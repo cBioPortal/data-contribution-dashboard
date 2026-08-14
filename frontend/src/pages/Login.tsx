@@ -4,11 +4,11 @@ import SharedLayout from "@/components/SharedLayout";
 import { FaGoogle, FaGithub } from "react-icons/fa";
 import { User, LogOut, ArrowRight } from "lucide-react";
 import { login as kcLogin, logout as kcLogout } from "@/services/keycloak";
+import { API_URL } from "@/config";
 
 const Login = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<{ email: string; name: string } | null>(null);
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5001";
 
   useEffect(() => {
     // Check if user is already logged in
@@ -32,7 +32,7 @@ const Login = () => {
         localStorage.removeItem('authToken');
       });
     }
-  }, [API_URL]);
+  }, []);
 
   // Login is handled by Keycloak. The idpHint routes straight to the chosen
   // identity provider; without it, Keycloak shows its own login page.

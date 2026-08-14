@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
+import { API_URL } from "@/config";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -7,7 +8,6 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5001";
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -41,7 +41,7 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     };
 
     checkAuth();
-  }, [API_URL]);
+  }, []);
 
   // Still checking authentication
   if (isAuthenticated === null) {

@@ -14,6 +14,7 @@ import { Submission } from "@/types/submission";
 
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
+import { API_URL } from "@/config";
 
 const TrackStatus = () => {
   logger.debug("TrackStatus component rendering");
@@ -39,7 +40,6 @@ const TrackStatus = () => {
   useEffect(() => {
     const token = localStorage.getItem('authToken');
     if (!token) return;
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
     fetch(`${API_URL}/api/auth/profile`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
@@ -70,7 +70,6 @@ const TrackStatus = () => {
         let isSuper = false;
         let tokenIsValid = !!token;
         if (token) {
-          const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
           try {
             const profileRes = await fetch(`${API_URL}/api/auth/profile`, {
               headers: { 'Authorization': `Bearer ${token}` }

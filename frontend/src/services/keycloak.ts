@@ -1,4 +1,5 @@
 import Keycloak from 'keycloak-js';
+import { KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID } from '@/config';
 
 /**
  * Keycloak singleton for the dashboard.
@@ -9,9 +10,9 @@ import Keycloak from 'keycloak-js';
  * just a transport for the current bearer token.
  */
 const keycloak = new Keycloak({
-  url: import.meta.env.VITE_KEYCLOAK_URL || 'http://localhost:8081',
-  realm: import.meta.env.VITE_KEYCLOAK_REALM || 'dashboard',
-  clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'dashboard-frontend',
+  url: KEYCLOAK_URL,
+  realm: KEYCLOAK_REALM,
+  clientId: KEYCLOAK_CLIENT_ID,
 });
 
 function syncToken() {

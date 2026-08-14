@@ -10,12 +10,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { API_URL } from "@/config";
 
 const Header = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [user, setUser] = useState<{ email: string; name: string } | null>(null);
   const isMobile = useIsMobile();
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5001";
 
   useEffect(() => {
     // Check if user is logged in
@@ -36,7 +36,7 @@ const Header = () => {
         localStorage.removeItem('authToken');
       });
     }
-  }, [API_URL]);
+  }, []);
 
   const toggleMobileMenu = () => {
     setMobileMenuOpen(!mobileMenuOpen);

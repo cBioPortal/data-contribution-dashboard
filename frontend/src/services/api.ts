@@ -1,5 +1,4 @@
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5001";
+import { API_URL as API_BASE_URL } from "@/config";
 
 /**
  * Generic API fetch helper
@@ -188,8 +187,7 @@ export const addNoteToSubmission = async (id: string, note: string) => {
   const token = localStorage.getItem('authToken');
   if (!token) throw new Error('Authentication required. Please log in.');
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-  const response = await fetch(`${API_URL}/api/submit/${id}/add-note`, {
+  const response = await fetch(`${API_BASE_URL}/api/submit/${id}/add-note`, {
     method: 'PATCH',
     headers: {
       'Authorization': `Bearer ${token}`,

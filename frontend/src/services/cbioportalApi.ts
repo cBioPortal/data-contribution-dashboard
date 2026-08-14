@@ -1,5 +1,6 @@
+import { API_URL } from "@/config";
+
 const CBIOPORTAL_API = "https://www.cbioportal.org/api";
-const BACKEND_URL = () => import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
 // ─── cBioPortal public API ───────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ export const fetchPatientsCount = async (): Promise<number> => {
 
 export const fetchStudySampleCounts = async (): Promise<Record<string, number>> => {
   try {
-    const r = await fetch(`${BACKEND_URL()}/api/analytics/study-sample-counts`);
+    const r = await fetch(`${API_URL}/api/analytics/study-sample-counts`);
     if (!r.ok) throw new Error(`Failed to fetch study sample counts: ${r.status}`);
     return (await r.json()).data;
   } catch (error) {
@@ -48,7 +49,7 @@ export const fetchStudySampleCounts = async (): Promise<Record<string, number>> 
 
 export const fetchCancerTypeSamples = async (limit = 20): Promise<Array<{ cancerTypeId: string; name: string; samples: number; studies: number }>> => {
   try {
-    const r = await fetch(`${BACKEND_URL()}/api/analytics/cancer-type-samples?limit=${limit}`);
+    const r = await fetch(`${API_URL}/api/analytics/cancer-type-samples?limit=${limit}`);
     if (!r.ok) throw new Error(`Failed to fetch cancer type samples: ${r.status}`);
     return (await r.json()).data;
   } catch (error) {
@@ -59,7 +60,7 @@ export const fetchCancerTypeSamples = async (limit = 20): Promise<Array<{ cancer
 
 export const fetchSampleCountsByDataType = async (year: number): Promise<Array<{ name: string; count: number }>> => {
   try {
-    const r = await fetch(`${BACKEND_URL()}/api/analytics/sample-counts-by-datatype?year=${year}`);
+    const r = await fetch(`${API_URL}/api/analytics/sample-counts-by-datatype?year=${year}`);
     if (!r.ok) throw new Error(`Failed to fetch sample counts by data type: ${r.status}`);
     return (await r.json()).data;
   } catch (error) {
@@ -70,7 +71,7 @@ export const fetchSampleCountsByDataType = async (year: number): Promise<Array<{
 
 export const fetchCumulativeGrowth = async (): Promise<Array<{ year: number; studies: number; samples: number }>> => {
   try {
-    const r = await fetch(`${BACKEND_URL()}/api/analytics/cumulative-growth`);
+    const r = await fetch(`${API_URL}/api/analytics/cumulative-growth`);
     if (!r.ok) throw new Error(`Failed to fetch cumulative growth: ${r.status}`);
     return (await r.json()).data;
   } catch (error) {
@@ -81,7 +82,7 @@ export const fetchCumulativeGrowth = async (): Promise<Array<{ year: number; stu
 
 export const fetchNewsReleases = async () => {
   try {
-    const r = await fetch(`${BACKEND_URL()}/api/analytics/news-releases`);
+    const r = await fetch(`${API_URL}/api/analytics/news-releases`);
     if (!r.ok) throw new Error(`Failed to fetch news releases: ${r.status}`);
     const json = await r.json();
     return { latest: json.latest, releases: json.releases };
@@ -92,13 +93,13 @@ export const fetchNewsReleases = async () => {
 };
 
 export const fetchPipelineFunnel = async () => {
-  const r = await fetch(`${BACKEND_URL()}/api/analytics/submissions/pipeline-funnel`);
+  const r = await fetch(`${API_URL}/api/analytics/submissions/pipeline-funnel`);
   if (!r.ok) throw new Error('Failed to fetch pipeline funnel');
   return (await r.json()).data;
 };
 
 export const fetchSubmissionVolume = async () => {
-  const r = await fetch(`${BACKEND_URL()}/api/analytics/submissions/volume-over-time`);
+  const r = await fetch(`${API_URL}/api/analytics/submissions/volume-over-time`);
   if (!r.ok) throw new Error('Failed to fetch submission volume');
   return (await r.json()).data;
 };
@@ -111,7 +112,7 @@ export interface SubmissionMix {
 }
 
 export const fetchSubmissionMix = async (): Promise<SubmissionMix> => {
-  const r = await fetch(`${BACKEND_URL()}/api/analytics/submissions/mix`);
+  const r = await fetch(`${API_URL}/api/analytics/submissions/mix`);
   if (!r.ok) throw new Error('Failed to fetch submission mix');
   return (await r.json()).data;
 };
