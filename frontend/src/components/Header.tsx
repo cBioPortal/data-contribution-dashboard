@@ -64,7 +64,7 @@ const Header = () => {
             title="Visit cBioPortal"
           >
             <img 
-              src="/lovable-uploads/0e406f53-235c-4c83-86e2-9d72f6a60e13.png" 
+              src="/images/cbioportal-logo-header.png"
               alt="cBioPortal Logo" 
               className="h-8 sm:h-10" 
             />
