@@ -25,6 +25,7 @@ const TrackStatus = () => {
   const [activeTab, setActiveTab] = useState<'suggested-papers' | 'submitted-data' | 'my-submissions'>("suggested-papers");
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [userEmail, setUserEmail] = useState<string>('');
+  const [userId, setUserId] = useState<string>('');
   const [isSuperUser, setIsSuperUser] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [dataError, setDataError] = useState<boolean>(false);
@@ -36,7 +37,7 @@ const TrackStatus = () => {
   const preprintDataColumnDefs = usePreprintDataColumnDefs(isSuperUser);
   const mySubmissionsColumnDefs = useMySubmissionsColumnDefs(isSuperUser);
 
-  // Fetch user profile (role + email) — runs independently so isSuperUser is set before grid renders
+  // Fetch user profile (role + id + email) — runs independently so isSuperUser is set before grid renders
   useEffect(() => {
     const token = localStorage.getItem('authToken');
     if (!token) return;
@@ -47,6 +48,7 @@ const TrackStatus = () => {
       .then(d => {
         if (d.status === 'success') {
           setUserEmail(d.data.user.email);
+          setUserId(d.data.user.id);
           setIsSuperUser(d.data.user.role === 'super');
         }
       })
@@ -113,6 +115,9 @@ const TrackStatus = () => {
         // Transform backend submissions to match expected format
         const transformedSubmissions = response.data.submissions.map((sub: any) => ({
           submissionId: sub.id,
+          // Ownership signal — absent on public-projected records, which is what
+          // keeps other people's submissions out of the My Submissions tab.
+          userId: sub.userId,
           status: sub.displayStatus || mapBackendStatus(sub.status),
           title: sub.submissionType === 'suggest-paper' ? sub.paperTitle : (sub.studyName || sub.paperTitle),
           author: sub.submitterName,
@@ -228,16 +233,21 @@ const TrackStatus = () => {
     };
   }, [submissions]);
 
-  // My submissions — filtered by form email if provided, otherwise login email
+  // My submissions — mirrors the backend ownership rule (see submitRoutes.js
+  // add-note): owned if the account id matches, or the email on the form matches
+  // the login email. A record with neither is not mine, so it is excluded —
+  // public-projected records arrive stripped of both. Until the profile fetch
+  // resolves there is no identity to compare against, so show nothing rather
+  // than briefly flashing every submission.
   const mySubmissions = useMemo(() => {
-    if (!userEmail) return submissions;
+    if (!userId && !userEmail) return [];
+    const loginEmail = userEmail.toLowerCase().trim();
     return submissions.filter(sub => {
-      const formEmail = sub.email?.toLowerCase().trim();
-      const loginEmail = userEmail.toLowerCase().trim();
-      // Use form email as the identity if it was filled in, else fall back to login email
-      return formEmail ? formEmail === loginEmail : true;
+      const ownerById = !!userId && sub.userId === userId;
+      const ownerByEmail = !!loginEmail && sub.email?.toLowerCase().trim() === loginEmail;
+      return ownerById || ownerByEmail;
     });
-  }, [submissions, userEmail]);
+  }, [submissions, userId, userEmail]);
 
   // Search across all meaningful fields
   const matchesQuery = (submission: Submission, query: string): boolean => {
@@ -500,7 +510,7 @@ const TrackStatus = () => {
                     <div className="flex items-center gap-2 mb-4 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2">
                       <span className="inline-block w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
                       <span>Showing submissions for <span className="font-medium text-gray-700">{userEmail}</span></span>
-                      <span className="text-gray-400 text-xs ml-1">(form email if provided, otherwise login email)</span>
+                      <span className="text-gray-400 text-xs ml-1">(submitted by this account, or with this email on the form)</span>
                     </div>
                   )}
 

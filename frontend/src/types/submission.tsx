@@ -3,6 +3,7 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/comp
 
 export interface Submission {
   submissionId?: string;
+  userId?: string;
   issueNumber?: string;
   status: string;
   title?: string;
