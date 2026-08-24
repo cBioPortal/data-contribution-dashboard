@@ -1,4 +1,5 @@
 import { API_URL as API_BASE_URL } from "@/config";
+import { ensureFreshToken } from '@/services/keycloak';
 
 /**
  * Generic API fetch helper
@@ -39,16 +40,28 @@ const fetchApi = async (endpoint: string, options: RequestInit = {}) => {
 };
 
 /**
+ * Token for an authenticated request.
+ *
+ * Refreshes through Keycloak first, so a request issued after the user has spent
+ * a while on a page still carries a live token. Access tokens are short-lived and
+ * the submission form takes longer to fill in than one lasts. Falls back to the
+ * mirrored copy only if Keycloak has not initialised yet.
+ */
+const requireToken = async (): Promise<string> => {
+  const token = (await ensureFreshToken()) ?? localStorage.getItem('authToken');
+  if (!token) {
+    throw new Error('Your session has expired. Please log in again.');
+  }
+  return token;
+};
+
+/**
  * Submit content form data to backend
  * New unified endpoint that handles all submission types.
  * Data is shared by the submitter via an external link (no file uploads).
  */
 export const submitContent = async (formData: any, skipDuplicateCheck?: boolean) => {
-  const token = localStorage.getItem('authToken');
-
-  if (!token) {
-    throw new Error('Authentication required. Please log in.');
-  }
+  const token = await requireToken();
 
   const response = await fetch(`${API_BASE_URL}/api/submit`, {
     method: 'POST',
@@ -110,11 +123,7 @@ export const getPublicSubmissions = async () => {
  * Get all submissions for the current user
  */
 export const getMySubmissions = async () => {
-  const token = localStorage.getItem('authToken');
-  
-  if (!token) {
-    throw new Error('Authentication required. Please log in.');
-  }
+  const token = await requireToken();
   
   return fetchApi('/api/submit', {
     method: 'GET',
@@ -128,11 +137,7 @@ export const getMySubmissions = async () => {
  * Get a specific submission by ID
  */
 export const getSubmission = async (id: string) => {
-  const token = localStorage.getItem('authToken');
-  
-  if (!token) {
-    throw new Error('Authentication required. Please log in.');
-  }
+  const token = await requireToken();
   
   return fetchApi(`/api/submit/${id}`, {
     method: 'GET',
@@ -151,8 +156,7 @@ export const updateCurationNotes = async (
   action: 'append' | 'edit' | 'delete' = 'append',
   noteIndex?: number
 ) => {
-  const token = localStorage.getItem('authToken');
-  if (!token) throw new Error('Authentication required. Please log in.');
+  const token = await requireToken();
   return fetchApi(`/api/submit/${id}/curation-notes`, {
     method: 'PATCH',
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -164,11 +168,7 @@ export const updateCurationNotes = async (
  * Update submission status (super users only)
  */
 export const updateSubmissionStatus = async (id: string, status: string, displayStatus?: string) => {
-  const token = localStorage.getItem('authToken');
-  
-  if (!token) {
-    throw new Error('Authentication required. Please log in.');
-  }
+  const token = await requireToken();
   
   return fetchApi(`/api/submit/${id}/status`, {
     method: 'PATCH',
@@ -184,8 +184,7 @@ export const updateSubmissionStatus = async (id: string, status: string, display
  * Add a note to an existing submission (owner only)
  */
 export const addNoteToSubmission = async (id: string, note: string) => {
-  const token = localStorage.getItem('authToken');
-  if (!token) throw new Error('Authentication required. Please log in.');
+  const token = await requireToken();
 
   const response = await fetch(`${API_BASE_URL}/api/submit/${id}/add-note`, {
     method: 'PATCH',
@@ -207,11 +206,7 @@ export const addNoteToSubmission = async (id: string, note: string) => {
  * Delete a submission
  */
 export const deleteSubmission = async (id: string) => {
-  const token = localStorage.getItem('authToken');
-  
-  if (!token) {
-    throw new Error('Authentication required. Please log in.');
-  }
+  const token = await requireToken();
   
   return fetchApi(`/api/submit/${id}`, {
     method: 'DELETE',

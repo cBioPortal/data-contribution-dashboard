@@ -65,14 +65,46 @@ export async function initKeycloak() {
     );
     syncToken();
     // Keep the mirrored token fresh as it nears expiry.
-    keycloak.onTokenExpired = () => {
-      keycloak.updateToken(30).then(syncToken).catch(syncToken);
-    };
+    // Proactive refresh on expiry. ensureFreshToken() clears the mirrored token
+    // when renewal fails, rather than re-writing the expired one.
+    keycloak.onTokenExpired = () => { void ensureFreshToken(); };
   } catch (e) {
     console.error('Keycloak init failed', e);
     syncToken();
   }
   return keycloak;
+}
+
+/**
+ * Return a token that is valid for at least `minValiditySeconds`, refreshing it
+ * through Keycloak first if necessary.
+ *
+ * Call this before every authenticated request. Access tokens are short-lived —
+ * five minutes by default — and filling in the submission form takes far longer
+ * than that, so relying on the onTokenExpired timer alone meant a user who read
+ * the form before submitting hit "Invalid or expired token". updateToken() is a
+ * cheap no-op while the token is still valid, and each successful call also
+ * resets Keycloak's SSO idle timer, so an active user's session stays alive.
+ *
+ * Returns null when the session cannot be renewed. Callers should send the user
+ * back to log in rather than retrying with a token the API will reject.
+ */
+export async function ensureFreshToken(minValiditySeconds = 60): Promise<string | null> {
+  if (!keycloak.authenticated) {
+    localStorage.removeItem('authToken');
+    return null;
+  }
+  try {
+    await keycloak.updateToken(minValiditySeconds);
+    syncToken();
+    return keycloak.token ?? null;
+  } catch {
+    // The refresh token is gone or the SSO session ended. Drop the mirrored
+    // token — writing the expired one back is what previously left the app
+    // wedged, retrying forever with a token that could never succeed.
+    localStorage.removeItem('authToken');
+    return null;
+  }
 }
 
 /** Start login. Pass an idpHint to jump straight to Google/GitHub. */
