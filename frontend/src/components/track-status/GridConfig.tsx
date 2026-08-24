@@ -494,7 +494,7 @@ export const useDataColumnDefs = (isSuperUser: boolean = false): ColumnDef[] => 
 // Pre-publication Data Submissions: same as Data Submissions but without the
 // PMID/URL column (pre-publication submissions have no PMID/URL).
 export const usePreprintDataColumnDefs = (isSuperUser: boolean = false): ColumnDef[] =>
-  useDataColumnDefs(isSuperUser).filter(col => col.field !== 'pmid');
+  useDataColumnDefs(isSuperUser).filter(col => !('field' in col && col.field === 'pmid'));
 
 // My Submissions: unified table with Source column, shared title field
 export const useMySubmissionsColumnDefs = (isSuperUser: boolean = false): ColumnDef[] => [

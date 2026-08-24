@@ -20,6 +20,8 @@ import {
   findConflict,
   findSimilarByTitle,
 } from '../utils/duplicateDetection.js';
+import logger from '../utils/logger.js';
+import { isOwnedBy } from '../utils/ownership.js';
 
 // Curation team account that submitters must grant data access to.
 export const CURATION_EMAIL = 'cdsicuration@mskcc.org';
@@ -88,7 +90,7 @@ router.get('/public', async (req, res) => {
       data: { submissions, count: submissions.length }
     });
   } catch (error) {
-    console.error('Get public submissions error:', error);
+    logger.error('Get public submissions error:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch submissions' });
   }
 });
@@ -130,7 +132,7 @@ router.post('/bulk-import',
           await removeSubmission(key);
         }
         deleted = toDelete.length;
-        console.log(`🗑️  Bulk import: deleted ${deleted} existing study-suggestion entries`);
+        logger.info(`🗑️  Bulk import: deleted ${deleted} existing study-suggestion entries`);
       }
 
       // Insert each submission
@@ -152,7 +154,7 @@ router.post('/bulk-import',
         imported++;
       }
 
-      console.log(`✅ Bulk import complete: ${imported} inserted, ${deleted} deleted`);
+      logger.info(`✅ Bulk import complete: ${imported} inserted, ${deleted} deleted`);
 
       res.status(201).json({
         status: 'success',
@@ -161,7 +163,7 @@ router.post('/bulk-import',
       });
 
     } catch (error) {
-      console.error('Bulk import error:', error);
+      logger.error('Bulk import error:', error);
       res.status(500).json({ status: 'error', message: 'Bulk import failed', error: error.message });
     }
   }
@@ -176,7 +178,7 @@ router.post('/',
   authenticateToken,
   async (req, res) => {
     try {
-      console.log('📥 Received submission from:', req.user.email);
+      logger.info('📥 Received submission from:', req.user.email);
 
       // Form data arrives as a JSON object (no file uploads — data is shared
       // by the submitter via an external link with access granted to curation).
@@ -218,7 +220,7 @@ router.post('/',
           });
           
           userId = newUser.id;
-          console.log(`✅ User auto-registered on submission: ${newUser.email}`);
+          logger.info(`✅ User auto-registered on submission: ${newUser.email}`);
         } else {
           userId = existingUser.id;
         }
@@ -278,7 +280,7 @@ router.post('/',
       const skipDuplicateCheck = req.body.skipDuplicateCheck === true;
       const isPublished = formData.publicationType === 'published';
 
-      console.log(`🔍 Duplicate check: isPublished=${isPublished}, role=${req.user.role}, skipDuplicateCheck=${skipDuplicateCheck}`);
+      logger.info(`🔍 Duplicate check: isPublished=${isPublished}, role=${req.user.role}, skipDuplicateCheck=${skipDuplicateCheck}`);
 
       if (isPublished) {
         const incomingIds = new Set();
@@ -335,10 +337,10 @@ router.post('/',
                 existingSub.supersededAt = new Date().toISOString();
                 existingSub.updatedAt = new Date().toISOString();
                 await saveSubmission(conflict.existingId, existingSub);
-                console.log(`⚠️  Suggestion ${conflict.existingId} superseded by new data submission ${submissionId}`);
+                logger.info(`⚠️  Suggestion ${conflict.existingId} superseded by new data submission ${submissionId}`);
               }
             } catch (e) {
-              console.warn('⚠️  Could not tag superseded suggestion:', e.message);
+              logger.warn('⚠️  Could not tag superseded suggestion:', e.message);
             }
           }
         }
@@ -368,10 +370,10 @@ router.post('/',
       // Notify Slack (fire-and-forget)
       notifyNewSubmission(submission);
       
-      console.log(`✅ Submission created: ${submissionId}`);
-      console.log(`   Type: ${submission.submissionType}`);
-      console.log(`   User: ${req.user.email}`);
-      console.log(`   Data link: ${submission.linkToData || '(none)'}`);
+      logger.info(`✅ Submission created: ${submissionId}`);
+      logger.info(`   Type: ${submission.submissionType}`);
+      logger.info(`   User: ${req.user.email}`);
+      logger.info(`   Data link: ${submission.linkToData || '(none)'}`);
 
       res.status(201).json({
         status: 'success',
@@ -384,7 +386,7 @@ router.post('/',
       });
       
     } catch (error) {
-      console.error('❌ Create submission error:', error);
+      logger.error('❌ Create submission error:', error);
       res.status(500).json({
         status: 'error',
         message: 'Failed to create submission',
@@ -412,7 +414,7 @@ router.get('/:id',
       }
 
       // Check permissions
-      if (submission.userId !== req.user.id && req.user.role !== 'super') {
+      if (!isOwnedBy(submission, req.user) && req.user.role !== 'super') {
         return res.status(403).json({
           status: 'error',
           message: 'Access denied. You can only view your own submissions.'
@@ -425,7 +427,7 @@ router.get('/:id',
       });
 
     } catch (error) {
-      console.error('Get submission error:', error);
+      logger.error('Get submission error:', error);
       res.status(500).json({
         status: 'error',
         message: 'Failed to fetch submission'
@@ -446,7 +448,7 @@ router.get('/',
       const all = await listSubmissions();
       // Super users see all submissions; regular users only see their own
       const submissions = all.filter(submission =>
-        req.user.role === 'super' || submission.userId === req.user.id
+        req.user.role === 'super' || isOwnedBy(submission, req.user)
       );
 
       // Sort by submission date (newest first)
@@ -463,7 +465,7 @@ router.get('/',
       });
       
     } catch (error) {
-      console.error('Get submissions error:', error);
+      logger.error('Get submissions error:', error);
       res.status(500).json({
         status: 'error',
         message: 'Failed to fetch submissions'
@@ -525,7 +527,7 @@ router.patch('/:id/status',
 
       await saveSubmission(req.params.id, submission);
 
-      console.log(`✅ Status updated: ${req.params.id} → ${req.body.status}`);
+      logger.info(`✅ Status updated: ${req.params.id} → ${req.body.status}`);
 
       res.json({
         status: 'success',
@@ -536,7 +538,7 @@ router.patch('/:id/status',
       });
 
     } catch (error) {
-      console.error('Update status error:', error);
+      logger.error('Update status error:', error);
       res.status(500).json({
         status: 'error',
         message: 'Failed to update status'
@@ -599,10 +601,10 @@ router.patch('/:id/curation-notes',
       submission.updatedAt = new Date().toISOString();
 
       await saveSubmission(req.params.id, submission);
-      console.log(`✅ Curation notes updated: ${req.params.id} (${notes.length} note(s))`);
+      logger.info(`✅ Curation notes updated: ${req.params.id} (${notes.length} note(s))`);
       res.json({ status: 'success', message: 'Curation notes updated', data: { curationNotesArray: notes, curationNotes: submission.curationNotes } });
     } catch (error) {
-      console.error('Update curation notes error:', error);
+      logger.error('Update curation notes error:', error);
       res.status(500).json({ status: 'error', message: 'Failed to update curation notes' });
     }
   }
@@ -623,12 +625,7 @@ router.patch('/:id/add-note',
         return res.status(404).json({ status: 'error', message: 'Submission not found' });
       }
 
-      const ownerById = submission.userId === req.user.id;
-      const ownerByEmail = submission.submitterEmail &&
-        req.user.email &&
-        submission.submitterEmail.toLowerCase().trim() === req.user.email.toLowerCase().trim();
-
-      if (!ownerById && !ownerByEmail && req.user.role !== 'super') {
+      if (!isOwnedBy(submission, req.user) && req.user.role !== 'super') {
         return res.status(403).json({ status: 'error', message: 'Access denied' });
       }
 
@@ -648,7 +645,7 @@ router.patch('/:id/add-note',
 
       await saveSubmission(req.params.id, submission);
 
-      console.log(`✅ Note added to submission ${req.params.id} by ${req.user.email}`);
+      logger.info(`✅ Note added to submission ${req.params.id} by ${req.user.email}`);
 
       // Notify Slack — only for non-super users (submitter actions)
       if (req.user.role !== 'super') {
@@ -662,7 +659,7 @@ router.patch('/:id/add-note',
         data: { note: newNote, totalNotes: submission.submitterNotes.length },
       });
     } catch (error) {
-      console.error('Add note error:', error);
+      logger.error('Add note error:', error);
       res.status(500).json({ status: 'error', message: 'Failed to add note' });
     }
   }
@@ -696,7 +693,7 @@ router.delete('/:id',
       // Delete from database
       await removeSubmission(req.params.id);
 
-      console.log(`✅ Submission deleted: ${req.params.id}`);
+      logger.info(`✅ Submission deleted: ${req.params.id}`);
       
       res.json({
         status: 'success',
@@ -704,7 +701,7 @@ router.delete('/:id',
       });
       
     } catch (error) {
-      console.error('Delete submission error:', error);
+      logger.error('Delete submission error:', error);
       res.status(500).json({
         status: 'error',
         message: 'Failed to delete submission'

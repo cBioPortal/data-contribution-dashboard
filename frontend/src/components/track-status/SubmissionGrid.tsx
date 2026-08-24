@@ -14,9 +14,10 @@ interface SubmissionGridProps {
   trackType?: 'suggested-papers' | 'submitted-data';
   isSuperUser?: boolean;
   currentUserEmail?: string;
+  currentUserId?: string;
 }
 
-export const SubmissionGrid = ({ rowData, columnDefs, onRowSelected, onStatusChanged, onDeleted, trackType = 'suggested-papers', isSuperUser = false, currentUserEmail = '' }: SubmissionGridProps) => {
+export const SubmissionGrid = ({ rowData, columnDefs, onRowSelected, onStatusChanged, onDeleted, trackType = 'suggested-papers', isSuperUser = false, currentUserEmail = '', currentUserId = '' }: SubmissionGridProps) => {
   const [selectedRow, setSelectedRow] = useState<Submission | null>(null);
   const currentPageRef = useRef<number>(0);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -146,6 +147,7 @@ export const SubmissionGrid = ({ rowData, columnDefs, onRowSelected, onStatusCha
             data={selectedRow}
             isSuperUser={isSuperUser}
             currentUserEmail={currentUserEmail}
+            currentUserId={currentUserId}
             onDeleted={(id) => {
               setSelectedRow(null);
               onDeleted?.(id);

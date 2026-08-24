@@ -23,6 +23,30 @@ function syncToken() {
   }
 }
 
+/**
+ * Hard cap on Keycloak initialisation.
+ *
+ * keycloak-js settles the `check-sso` promise only when its hidden iframe posts
+ * back, and that promise carries no timeout of its own. If the iframe can't
+ * complete the round trip — an unregistered redirect URI, a renamed realm, an
+ * unreachable server — it never settles, and because main.tsx renders in
+ * `.finally()` the app stays permanently blank with nothing logged.
+ *
+ * Losing SSO degrades gracefully (login is optional for browsing). A blank page
+ * does not. So we bound the wait and render regardless.
+ */
+const INIT_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Keycloak init did not settle within ${ms}ms`)),
+      ms,
+    );
+    promise.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
+}
+
 let initialized = false;
 
 /** Initialize Keycloak once. Uses check-sso so login stays optional. */
@@ -30,12 +54,15 @@ export async function initKeycloak() {
   if (initialized) return keycloak;
   initialized = true;
   try {
-    await keycloak.init({
-      onLoad: 'check-sso',
-      silentCheckSsoRedirectUri: `${window.location.origin}/silent-check-sso.html`,
-      pkceMethod: 'S256',
-      checkLoginIframe: false,
-    });
+    await withTimeout(
+      keycloak.init({
+        onLoad: 'check-sso',
+        silentCheckSsoRedirectUri: `${window.location.origin}/silent-check-sso.html`,
+        pkceMethod: 'S256',
+        checkLoginIframe: false,
+      }),
+      INIT_TIMEOUT_MS,
+    );
     syncToken();
     // Keep the mirrored token fresh as it nears expiry.
     keycloak.onTokenExpired = () => {

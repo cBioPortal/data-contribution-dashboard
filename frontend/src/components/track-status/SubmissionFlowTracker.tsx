@@ -18,10 +18,11 @@ interface SubmissionFlowTrackerProps {
   data?: any;
   isSuperUser?: boolean;
   currentUserEmail?: string;
+  currentUserId?: string;
   onDeleted?: (submissionId: string) => void;
 }
 
-export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-papers', data, isSuperUser = false, currentUserEmail = '', onDeleted }: SubmissionFlowTrackerProps) => {
+export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-papers', data, isSuperUser = false, currentUserEmail = '', currentUserId = '', onDeleted }: SubmissionFlowTrackerProps) => {
   const d = (data as any) || {};
   const [curationNotes, setCurationNotes] = useState<string>(d.curationNotes || '');
   const [curationNotesArray, setCurationNotesArray] = useState<any[]>(d.curationNotesArray || []);
@@ -34,9 +35,14 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
     setCurationNotesArray(d.curationNotesArray || []);
   }, [d.submissionId, d.curationNotes]);
 
-  // The submitter is identified by matching the logged-in email to the submission email
-  const isSubmitter = !!currentUserEmail && !!d.email &&
-    currentUserEmail.toLowerCase().trim() === d.email.toLowerCase().trim();
+  // Mirrors the backend's isOwnedBy() (submitRoutes.js): the account filed it, or
+  // the login email is the address on the form. Both anchored on the logged-in
+  // identity, so a different form email neither disowns a record the account filed
+  // nor claims one for whoever owns that address.
+  const isSubmitter =
+    (!!currentUserId && d.userId === currentUserId) ||
+    (!!currentUserEmail && !!d.email &&
+      currentUserEmail.toLowerCase().trim() === d.email.toLowerCase().trim());
 
   // Determine which flow to use
   const isNotCuratable = currentStatus === 'Not Curatable' || currentStatus === 'Missing Data';

@@ -192,5 +192,14 @@ Recognised variables: `VITE_API_URL`, `VITE_KEYCLOAK_URL`, `VITE_KEYCLOAK_REALM`
 ### Node version
 
 The frontend build requires **Node 18+** (Vite 4); the images use `node:20-alpine`.
-The `engines.node: >=16` field in `package.json` understates this — building with
-Node 16 or older fails.
+Both packages declare `engines.node: >=18` to match.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local
+setup and the checks to run before opening a pull request.
+
+## License
+
+Licensed under the GNU Affero General Public License v3.0 — see [LICENSE](LICENSE),
+matching the license used across the cBioPortal project.

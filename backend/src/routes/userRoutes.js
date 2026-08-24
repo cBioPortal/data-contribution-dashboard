@@ -14,6 +14,7 @@ import {
 } from '../db/users.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { requireSuper } from '../middleware/roleCheck.js';
+import logger from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -39,7 +40,7 @@ router.get('/', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get users error:', error);
+    logger.error('Get users error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch users'
@@ -73,7 +74,7 @@ router.get('/:id', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get user error:', error);
+    logger.error('Get user error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch user'
@@ -121,7 +122,7 @@ router.put('/:id/role',
         }
       });
     } catch (error) {
-      console.error('Change role error:', error);
+      logger.error('Change role error:', error);
       
       if (error.message.includes('not found')) {
         return res.status(404).json({
@@ -160,7 +161,7 @@ router.delete('/:id', async (req, res) => {
       message: 'User deleted successfully'
     });
   } catch (error) {
-    console.error('Delete user error:', error);
+    logger.error('Delete user error:', error);
 
     // restrict_violation (ON DELETE RESTRICT) / foreign_key_violation:
     // the user still owns submissions.

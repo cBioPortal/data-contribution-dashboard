@@ -12,6 +12,11 @@ export interface Submission {
   url?: string;
   isExpansionRow?: boolean;
   submissionType?: 'suggest-paper' | 'submit-data';
+  pmid?: string;
+  // Stored as an array in the submission document, not a string.
+  dataTypes?: string[];
+  referenceGenome?: string;
+  associatedPaper?: string;
   publicationType?: 'published' | 'preprint';
   sharingPreference?: 'public' | 'private';
   // Legacy fields for backward compatibility

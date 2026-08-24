@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import logger from './utils/logger.js';
 dotenv.config();
 
 const required = [
@@ -11,7 +12,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 const missing = required.filter(k => !process.env[k]);
 if (missing.length) {
-  console.error(`❌ Missing required env vars: ${missing.join(', ')}`);
+  logger.error(`❌ Missing required env vars: ${missing.join(', ')}`);
   process.exit(1);
 }
 

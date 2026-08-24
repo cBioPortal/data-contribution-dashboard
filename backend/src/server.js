@@ -11,8 +11,19 @@ import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import submitRoutes from './routes/submitRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
+import logger from './utils/logger.js';
 
 const app = express();
+
+// Requests arrive through the Traefik ingress, so the socket peer is the proxy,
+// not the caller. Without this, req.ip is the same for everybody and the rate
+// limiter below collapses into a single global bucket shared by all visitors.
+//
+// The value is a hop count, deliberately not `true`: trusting the whole
+// X-Forwarded-For chain would let a client prepend an arbitrary address and get
+// a fresh bucket per request, evading the limit entirely. Raise this only if
+// another trusted proxy is added in front.
+app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet());
@@ -55,7 +66,7 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
+  logger.error('Error:', err);
   const message = process.env.NODE_ENV === 'production' ? 'Something went wrong!' : err.message;
   res.status(err.statusCode || 500).json({
     status: 'error',
@@ -70,16 +81,16 @@ async function startServer() {
   try {
     await initializeDatabases();
     app.listen(PORT, () => {
-      console.log(`🚀 Server running on http://localhost:${PORT} [${process.env.NODE_ENV || 'development'}]`);
+      logger.info(`🚀 Server running on http://localhost:${PORT} [${process.env.NODE_ENV || 'development'}]`);
     });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    logger.error('Failed to start server:', error);
     process.exit(1);
   }
 }
 
 async function shutdown() {
-  console.log('\n🛑 Shutting down...');
+  logger.info('\n🛑 Shutting down...');
   try {
     await closeDatabases();
     process.exit(0);
@@ -90,7 +101,7 @@ async function shutdown() {
 
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
-process.on('unhandledRejection', (err) => { console.error('Unhandled Rejection:', err); shutdown(); });
+process.on('unhandledRejection', (err) => { logger.error('Unhandled Rejection:', err); shutdown(); });
 
 startServer();
 export default app;

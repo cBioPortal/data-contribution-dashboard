@@ -9,6 +9,7 @@ import express from 'express';
 import fetch from 'node-fetch';
 import { clickhouseClient } from '../db/index.js';
 import { listSubmissions } from '../db/submissions.js';
+import logger from '../utils/logger.js';
 
 const router = express.Router();
 const CH_DB = process.env.CLICKHOUSE_DATABASE || 'cbioportal_public_blue';
@@ -71,7 +72,7 @@ router.get('/cancer-type-samples', async (req, res) => {
       }))
     });
   } catch (error) {
-    console.error('ClickHouse query error:', error);
+    logger.error('ClickHouse query error:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch cancer type samples' });
   }
 });
@@ -95,7 +96,7 @@ router.get('/study-sample-counts', async (req, res) => {
     rows.forEach(row => { lookup[row.studyId] = Number(row.sampleCount); });
     res.json({ status: 'success', data: lookup });
   } catch (error) {
-    console.error('ClickHouse study sample counts error:', error);
+    logger.error('ClickHouse study sample counts error:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch study sample counts' });
   }
 });
@@ -226,7 +227,7 @@ router.get('/cumulative-growth', async (req, res) => {
 
     res.json({ status: 'success', data, unknownYearCount });
   } catch (error) {
-    console.error('Cumulative growth (news-based) error:', error);
+    logger.error('Cumulative growth (news-based) error:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch cumulative growth data' });
   }
 });
@@ -343,7 +344,7 @@ router.get('/sample-counts-by-datatype', async (req, res) => {
 
     res.json({ status: 'success', year, data });
   } catch (error) {
-    console.error('ClickHouse sample counts by datatype error:', error);
+    logger.error('ClickHouse sample counts by datatype error:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch sample counts by data type' });
   }
 });
@@ -400,7 +401,7 @@ router.get('/news-releases', async (req, res) => {
       releases: releases.slice(0, limit),
     });
   } catch (error) {
-    console.error('News releases scrape error:', error);
+    logger.error('News releases scrape error:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch news releases' });
   }
 });
@@ -465,7 +466,7 @@ router.get('/submissions/pipeline-funnel', async (req, res) => {
 
     res.json({ status: 'success', data });
   } catch (error) {
-    console.error('Pipeline funnel error:', error);
+    logger.error('Pipeline funnel error:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch pipeline funnel' });
   }
 });
@@ -492,7 +493,7 @@ router.get('/submissions/volume-over-time', async (req, res) => {
     const data = Object.values(monthly).sort((a, b) => a.month.localeCompare(b.month));
     res.json({ status: 'success', data });
   } catch (error) {
-    console.error('Volume over time error:', error);
+    logger.error('Volume over time error:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch submission volume' });
   }
 });
@@ -532,7 +533,7 @@ router.get('/submissions/avg-time-per-stage', async (req, res) => {
 
     res.json({ status: 'success', data });
   } catch (error) {
-    console.error('Avg time per stage error:', error);
+    logger.error('Avg time per stage error:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch avg time per stage' });
   }
 });
@@ -583,7 +584,7 @@ router.get('/submissions/mix', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Submission mix error:', error);
+    logger.error('Submission mix error:', error);
     res.status(500).json({ status: 'error', message: 'Failed to fetch submission mix' });
   }
 });

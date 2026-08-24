@@ -6,6 +6,7 @@
  */
 
 import fetch from 'node-fetch';
+import logger from '../utils/logger.js';
 
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 
@@ -24,11 +25,11 @@ export async function sendSlackNotification(text) {
     });
 
     if (!res.ok) {
-      console.error('Slack webhook error:', res.status, await res.text());
+      logger.error('Slack webhook error:', res.status, await res.text());
     }
   } catch (err) {
     // Log but never throw — Slack failures should not break the app
-    console.error('Slack notification failed:', err.message);
+    logger.error('Slack notification failed:', err.message);
   }
 }
 

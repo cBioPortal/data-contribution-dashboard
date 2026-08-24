@@ -8,6 +8,7 @@
 
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import logger from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -26,7 +27,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get profile error:', error);
+    logger.error('Get profile error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Failed to get profile'

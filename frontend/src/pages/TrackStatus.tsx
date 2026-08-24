@@ -27,6 +27,10 @@ const TrackStatus = () => {
   const [userEmail, setUserEmail] = useState<string>('');
   const [userId, setUserId] = useState<string>('');
   const [isSuperUser, setIsSuperUser] = useState<boolean>(false);
+  // The profile request is independent of the submissions request. Until it
+  // lands there is no identity to filter "My Submissions" by, and rendering
+  // early would flash "No submissions found." at a user who has plenty.
+  const [profileLoaded, setProfileLoaded] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [dataError, setDataError] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -40,7 +44,7 @@ const TrackStatus = () => {
   // Fetch user profile (role + id + email) — runs independently so isSuperUser is set before grid renders
   useEffect(() => {
     const token = localStorage.getItem('authToken');
-    if (!token) return;
+    if (!token) { setProfileLoaded(true); return; }
     fetch(`${API_URL}/api/auth/profile`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
@@ -52,7 +56,8 @@ const TrackStatus = () => {
           setIsSuperUser(d.data.user.role === 'super');
         }
       })
-      .catch(() => logger.warn('Could not fetch user profile'));
+      .catch(() => logger.warn('Could not fetch user profile'))
+      .finally(() => setProfileLoaded(true));
   }, []);
 
   // Load submissions from backend
@@ -267,7 +272,13 @@ const TrackStatus = () => {
       submission.referenceGenome,
       submission.associatedPaper,
     ];
-    return fields.some(f => f?.toLowerCase().includes(query));
+    // Mixed value types: most fields are strings but dataTypes is an array, and
+    // calling .toLowerCase() on one throws. Normalise before matching.
+    return fields.some(f => {
+      if (f === null || f === undefined) return false;
+      const text = Array.isArray(f) ? f.join(' ') : String(f);
+      return text.toLowerCase().includes(query);
+    });
   };
 
   // Filter submissions based on search query and active tab
@@ -311,7 +322,7 @@ const TrackStatus = () => {
   logger.debug("Is loading:", isLoading);
 
   // Show loading state
-  if (isLoading) {
+  if (isLoading || !profileLoaded) {
     return (
       <SharedLayout>
         <div className="min-h-screen bg-gradient-to-b from-blue-50/50 to-white py-12">
@@ -431,6 +442,7 @@ const TrackStatus = () => {
                             trackType="suggested-papers"
                             isSuperUser={isSuperUser}
                             currentUserEmail={userEmail}
+                            currentUserId={userId}
                             onStatusChanged={handleStatusChanged}
                             onDeleted={handleDeleted}
                           />
@@ -446,6 +458,7 @@ const TrackStatus = () => {
                             trackType="submitted-data"
                             isSuperUser={isSuperUser}
                             currentUserEmail={userEmail}
+                            currentUserId={userId}
                             onStatusChanged={handleStatusChanged}
                             onDeleted={handleDeleted}
                           />
@@ -477,6 +490,7 @@ const TrackStatus = () => {
                             trackType="submitted-data"
                             isSuperUser={isSuperUser}
                             currentUserEmail={userEmail}
+                            currentUserId={userId}
                             onStatusChanged={handleStatusChanged}
                             onDeleted={handleDeleted}
                           />
@@ -493,6 +507,7 @@ const TrackStatus = () => {
                             trackType="submitted-data"
                             isSuperUser={isSuperUser}
                             currentUserEmail={userEmail}
+                            currentUserId={userId}
                             onStatusChanged={handleStatusChanged}
                             onDeleted={handleDeleted}
                           />
@@ -535,6 +550,7 @@ const TrackStatus = () => {
                       trackType="suggested-papers"
                       isSuperUser={false}
                       currentUserEmail={userEmail}
+                      currentUserId={userId}
                       onStatusChanged={handleStatusChanged}
                       onDeleted={handleDeleted}
                     />
