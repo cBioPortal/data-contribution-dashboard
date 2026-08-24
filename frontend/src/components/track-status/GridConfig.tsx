@@ -344,7 +344,11 @@ const statusCol: ColumnDef = {
   minWidth: 300,
   maxWidth: 400,
   suppressNavigable: true,
-  ...baseColumn
+  ...baseColumn,
+  // After the spread: baseColumn's ellipsis class would clip the pill and the
+  // assign-status dropdown. SubmissionGrid sizes this column to its content, so
+  // there is nothing to truncate.
+  cellClass: 'cell-status',
 };
 
 const pmidCol: ColumnDef = {
