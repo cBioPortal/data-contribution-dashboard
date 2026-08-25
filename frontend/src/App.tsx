@@ -6,10 +6,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import ProtectedRoute from "./components/ProtectedRoute";
 
+// The landing route ships in the entry chunk. Splitting it out meant the browser
+// had to fetch a second chunk after parsing the entry, and the Suspense fallback
+// below showed through as a blank page for that round trip. It is small; the
+// heavy routes are what actually needed splitting.
+import Index from "./pages/Index";
+
 // Split per route. ag-grid is ~47% of the bundle and recharts another ~17%, yet
 // each is used on a single route — loading both up front made every visitor pay
 // for the whole app before the landing page could paint.
-const Index = lazy(() => import("./pages/Index"));
 const Login = lazy(() => import("./pages/Login"));
 const SubmitContent = lazy(() => import("./pages/SubmitContent"));
 const TrackStatus = lazy(() => import("./pages/TrackStatus"));
