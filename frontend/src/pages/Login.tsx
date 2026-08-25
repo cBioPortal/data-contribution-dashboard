@@ -5,13 +5,15 @@ import { FaGoogle, FaGithub } from "react-icons/fa";
 import { User, LogOut, ArrowRight } from "lucide-react";
 import { login as kcLogin, logout as kcLogout } from "@/services/keycloak";
 import { API_URL } from "@/config";
+import { authReady } from '@/services/keycloak';
 
 const Login = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<{ email: string; name: string } | null>(null);
 
   useEffect(() => {
-    // Check if user is already logged in
+    // Check if user is already logged in, once Keycloak has resolved.
+    authReady.then(() => {
     const token = localStorage.getItem('authToken');
     if (token) {
       // Fetch user profile
@@ -32,6 +34,7 @@ const Login = () => {
         localStorage.removeItem('authToken');
       });
     }
+    });
   }, []);
 
   // Login is handled by Keycloak. The idpHint routes straight to the chosen

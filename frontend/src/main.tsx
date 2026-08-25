@@ -12,9 +12,12 @@ if (!container) {
 
 const root = createRoot(container);
 
-// Initialize Keycloak (check-sso, non-blocking login) before rendering so the
-// app boots with auth state resolved. Rendering proceeds even if Keycloak is
-// unreachable — login is optional for browsing the dashboard.
-initKeycloak().finally(() => {
-  root.render(<App />);
-});
+// Paint first, resolve authentication alongside.
+//
+// Keycloak's silent check-sso costs two sequential iframe round trips to the
+// auth server — about 0.7s in production — and rendering inside .finally() meant
+// none of the page existed until both had completed. Login is optional for
+// browsing, and everything that depends on the session now waits on `authReady`
+// (see services/keycloak.ts) instead of reading localStorage on mount.
+root.render(<App />);
+void initKeycloak();

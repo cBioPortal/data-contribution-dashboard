@@ -1,13 +1,17 @@
 
 
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCancerStudies, fetchSamples, fetchStudiesCount, fetchPatientsCount, fetchCancerTypeSamples } from '@/services/cbioportalApi';
 import { parseIssuesData, parsePullRequestsData } from '@/utils/dataParser';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import SamplesByCancerTypeChart from '@/components/analytics/SamplesByCancerTypeChart';
+// Deferred so recharts (~94 kB gzipped) stays off the landing page's critical
+// path. The chart sits below the fold, and the placeholder reserves its height
+// so nothing shifts when it arrives.
+const SamplesByCancerTypeChart = lazy(
+  () => import('@/components/analytics/SamplesByCancerTypeChart'));
 import { BarChart3, ArrowRight, FlaskConical, FileText, GitBranch, Users } from 'lucide-react';
 import issuesData from '@/data/issues.txt?raw';
 import pullRequestsData from '@/data/pull_requests.txt?raw';
@@ -150,14 +154,18 @@ const AnalyticsPreview: React.FC = () => {
               </CardHeader>
               <CardContent className="p-4 md:p-5">
                 <div className="h-48 md:h-52 lg:h-60 overflow-visible">
-                  <SamplesByCancerTypeChart
-                    data={top5SamplesByCancerType}
-                    isLoading={false}
-                    variant="embedded"
-                    height={240}
-                    maxBars={5}
-                    barSize={18}
-                  />
+                  {/* Empty fallback: the wrapper already reserves the height, so
+                      the chart fades in without moving anything around it. */}
+                  <Suspense fallback={<div className="h-full w-full" />}>
+                    <SamplesByCancerTypeChart
+                      data={top5SamplesByCancerType}
+                      isLoading={false}
+                      variant="embedded"
+                      height={240}
+                      maxBars={5}
+                      barSize={18}
+                    />
+                  </Suspense>
                 </div>
               </CardContent>
             </Card>

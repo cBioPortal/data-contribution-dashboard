@@ -40,6 +40,7 @@ import {
 import { FileText, Info, ArrowRight, ExternalLink, CheckCircle, LogIn, Clock, Search, Database, FlaskConical, AlertTriangle, ChevronDown } from "lucide-react";
 import { submitContent } from "@/services/api";
 import { Submission } from "@/types/submission";
+import { useAuthToken } from '@/hooks/useAuthToken';
 
 type PublicationType = "published" | "preprint" | null;
 type ActionType = "suggest-paper" | "submit-data" | null;
@@ -192,7 +193,10 @@ const SubmitContent = () => {
   const [redirectTab, setRedirectTab] = useState("");
   const redirectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const navigate = useNavigate();
-  const isLoggedIn = !!localStorage.getItem('authToken');
+  // undefined while auth resolves — only treat as signed out once we know, so
+  // the sign-in prompt does not flash for a user who is in fact logged in.
+  const authToken = useAuthToken();
+  const isLoggedIn = !!authToken;
 
   const doRedirect = (tab: string) => {
     if (redirectTimerRef.current) clearInterval(redirectTimerRef.current);
@@ -488,7 +492,7 @@ const SubmitContent = () => {
           </div>
 
           {/* Login required banner */}
-          {!isLoggedIn && (
+          {authToken === null && (
             <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl p-5 flex items-start gap-4">
               <LogIn className="h-6 w-6 text-amber-500 mt-0.5 flex-shrink-0" />
               <div>

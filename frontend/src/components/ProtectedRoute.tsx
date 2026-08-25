@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { API_URL } from "@/config";
+import { authReady } from '@/services/keycloak';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -11,6 +12,10 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
 
   useEffect(() => {
     const checkAuth = async () => {
+      // The app paints before Keycloak settles, so wait for the session to
+      // resolve. Reading the token straight away would send a logged-in user
+      // to /login on every visit.
+      await authReady;
       const token = localStorage.getItem('authToken');
       
       if (!token) {

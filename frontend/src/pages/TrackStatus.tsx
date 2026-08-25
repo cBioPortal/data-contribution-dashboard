@@ -15,6 +15,7 @@ import { Submission } from "@/types/submission";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 import { API_URL } from "@/config";
+import { authReady } from '@/services/keycloak';
 
 const TrackStatus = () => {
   logger.debug("TrackStatus component rendering");
@@ -43,6 +44,7 @@ const TrackStatus = () => {
 
   // Fetch user profile (role + id + email) — runs independently so isSuperUser is set before grid renders
   useEffect(() => {
+    authReady.then(() => {
     const token = localStorage.getItem('authToken');
     if (!token) { setProfileLoaded(true); return; }
     fetch(`${API_URL}/api/auth/profile`, {
@@ -58,6 +60,7 @@ const TrackStatus = () => {
       })
       .catch(() => logger.warn('Could not fetch user profile'))
       .finally(() => setProfileLoaded(true));
+    });
   }, []);
 
   // Load submissions from backend

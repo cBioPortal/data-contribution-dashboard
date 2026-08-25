@@ -47,12 +47,25 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/**
+ * Resolves once initKeycloak() has settled, whether or not a session was found.
+ *
+ * The app renders before authentication finishes, so anything reading the
+ * mirrored token must wait on this rather than reading localStorage on mount.
+ * Otherwise a logged-in user looks anonymous for the first second — and
+ * ProtectedRoute would redirect them to the login page before their session
+ * had a chance to load.
+ */
+let markAuthReady: () => void;
+export const authReady = new Promise<void>((resolve) => { markAuthReady = resolve; });
+
 let initialized = false;
 
 /** Initialize Keycloak once. Uses check-sso so login stays optional. */
 export async function initKeycloak() {
   if (initialized) return keycloak;
   initialized = true;
+
   try {
     await withTimeout(
       keycloak.init({
@@ -71,6 +84,11 @@ export async function initKeycloak() {
   } catch (e) {
     console.error('Keycloak init failed', e);
     syncToken();
+  } finally {
+    // Unblock waiters either way: a failed init means "not logged in", not
+    // "keep waiting". Leaving this unresolved would hang every auth-dependent
+    // view indefinitely.
+    markAuthReady();
   }
   return keycloak;
 }

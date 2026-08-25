@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { API_URL } from "@/config";
+import { authReady } from '@/services/keycloak';
 
 const Header = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -18,7 +19,8 @@ const Header = () => {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    // Check if user is logged in
+    // Wait for Keycloak before deciding whether anyone is signed in.
+    authReady.then(() => {
     const token = localStorage.getItem('authToken');
     if (token) {
       fetch(`${API_URL}/api/auth/profile`, {
@@ -36,6 +38,7 @@ const Header = () => {
         localStorage.removeItem('authToken');
       });
     }
+    });
   }, []);
 
   const toggleMobileMenu = () => {
