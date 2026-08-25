@@ -42,27 +42,6 @@ const TrackStatus = () => {
   const preprintDataColumnDefs = usePreprintDataColumnDefs(isSuperUser);
   const mySubmissionsColumnDefs = useMySubmissionsColumnDefs(isSuperUser);
 
-  // Fetch user profile (role + id + email) — runs independently so isSuperUser is set before grid renders
-  useEffect(() => {
-    authReady.then(() => {
-    const token = localStorage.getItem('authToken');
-    if (!token) { setProfileLoaded(true); return; }
-    fetch(`${API_URL}/api/auth/profile`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(r => r.json())
-      .then(d => {
-        if (d.status === 'success') {
-          setUserEmail(d.data.user.email);
-          setUserId(d.data.user.id);
-          setIsSuperUser(d.data.user.role === 'super');
-        }
-      })
-      .catch(() => logger.warn('Could not fetch user profile'))
-      .finally(() => setProfileLoaded(true));
-    });
-  }, []);
-
   // Load submissions from backend
   useEffect(() => {
     const loadSubmissions = async () => {
@@ -70,7 +49,10 @@ const TrackStatus = () => {
         setIsLoading(true);
         setDataError(false);
         
-        // Check if user is logged in
+        // The app renders before Keycloak resolves, so the mirrored token may not
+        // exist yet. Reading it now would treat a signed-in user as anonymous and
+        // silently drop their own submissions from the merge below.
+        await authReady;
         const token = localStorage.getItem('authToken');
         setIsLoggedIn(!!token);
 
@@ -94,6 +76,11 @@ const TrackStatus = () => {
               const profileData = await profileRes.json();
               if (profileData.status === 'success') {
                 isSuper = profileData.data.user.role === 'super';
+                // Feed the identity the "My Submissions" filter needs from this
+                // same response, instead of issuing a second identical request.
+                setUserEmail(profileData.data.user.email);
+                setUserId(profileData.data.user.id);
+                setIsSuperUser(isSuper);
               }
             }
           } catch {
@@ -183,6 +170,7 @@ const TrackStatus = () => {
           setDataError(true);
         }
       } finally {
+        setProfileLoaded(true);
         setIsLoading(false);
       }
     };
