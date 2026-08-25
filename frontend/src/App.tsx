@@ -11,11 +11,13 @@ import ProtectedRoute from "./components/ProtectedRoute";
 // below showed through as a blank page for that round trip. It is small; the
 // heavy routes are what actually needed splitting.
 import Index from "./pages/Index";
+// Login ships with the entry too: ProtectedRoute redirects here, and fetching a
+// separate 3 kB chunk mid-redirect left the page empty for another round trip.
+import Login from "./pages/Login";
 
 // Split per route. ag-grid is ~47% of the bundle and recharts another ~17%, yet
 // each is used on a single route — loading both up front made every visitor pay
 // for the whole app before the landing page could paint.
-const Login = lazy(() => import("./pages/Login"));
 const SubmitContent = lazy(() => import("./pages/SubmitContent"));
 const TrackStatus = lazy(() => import("./pages/TrackStatus"));
 const Analytics = lazy(() => import("./pages/Analytics"));

@@ -1,55 +1,27 @@
-import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { API_URL } from "@/config";
-import { authReady } from '@/services/keycloak';
+import { useAuthToken } from '@/hooks/useAuthToken';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
 }
 
+/**
+ * Gate for routes that require a signed-in user.
+ *
+ * Authorisation is decided from Keycloak's own resolved session rather than a
+ * verification call to the API. Keycloak has already validated the session by
+ * the time `useAuthToken` reports, so the extra round trip to /api/auth/profile
+ * only added latency — roughly a third of a second on every protected page load
+ * — to re-answer a question we already had the answer to. The API still checks
+ * the token on every request, so this gate is a UX affordance, not the security
+ * boundary.
+ */
 const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const token = useAuthToken();
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      // The app paints before Keycloak settles, so wait for the session to
-      // resolve. Reading the token straight away would send a logged-in user
-      // to /login on every visit.
-      await authReady;
-      const token = localStorage.getItem('authToken');
-      
-      if (!token) {
-        setIsAuthenticated(false);
-        return;
-      }
-
-      // Verify token with backend
-      try {
-        const response = await fetch(`${API_URL}/api/auth/profile`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-
-        if (response.ok) {
-          setIsAuthenticated(true);
-        } else {
-          // Token invalid, clear it
-          localStorage.removeItem('authToken');
-          setIsAuthenticated(false);
-        }
-      } catch (error) {
-        // Network error or backend down
-        localStorage.removeItem('authToken');
-        setIsAuthenticated(false);
-      }
-    };
-
-    checkAuth();
-  }, []);
-
-  // Still checking authentication
-  if (isAuthenticated === null) {
+  // undefined = Keycloak has not resolved yet. Deciding now would bounce a
+  // signed-in user to the login page.
+  if (token === undefined) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -60,12 +32,10 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     );
   }
 
-  // Not authenticated - redirect to login
-  if (!isAuthenticated) {
+  if (!token) {
     return <Navigate to="/login" replace />;
   }
 
-  // Authenticated - show the protected content
   return <>{children}</>;
 };
 
