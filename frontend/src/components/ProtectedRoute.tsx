@@ -1,5 +1,6 @@
 import { Navigate } from 'react-router-dom';
 import { useAuthToken } from '@/hooks/useAuthToken';
+import SharedLayout from '@/components/SharedLayout';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -21,14 +22,22 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
 
   // undefined = Keycloak has not resolved yet. Deciding now would bounce a
   // signed-in user to the login page.
+  //
+  // Rendered inside the normal layout rather than as a bare centred spinner.
+  // A protected route genuinely cannot choose between rendering and redirecting
+  // until this answer arrives, so unlike the public views there is nothing to
+  // show early — but the header and footer depend on nothing, and without them
+  // the wait reads as a blank screen rather than as a page still loading.
   if (token === undefined) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent mb-4"></div>
-          <p className="text-gray-600">Checking authentication...</p>
+      <SharedLayout>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center">
+            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent mb-4"></div>
+            <p className="text-gray-600">Checking authentication...</p>
+          </div>
         </div>
-      </div>
+      </SharedLayout>
     );
   }
 
