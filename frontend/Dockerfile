@@ -14,6 +14,9 @@ RUN npm run build
 FROM nginxinc/nginx-unprivileged:1.27-alpine
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Not under conf.d/, which nginx auto-includes into the http block — this one is
+# pulled in explicitly by each location that needs it.
+COPY nginx-security-headers.conf /etc/nginx/snippets/security-headers.conf
 
 # uid 101 is the `nginx` user; the html dir must be writable so the entrypoint
 # can rewrite config.js at startup.
