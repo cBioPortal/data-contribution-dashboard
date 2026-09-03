@@ -17,6 +17,75 @@ import "ag-grid-community/styles/ag-theme-alpine.css";
 import { API_URL } from "@/config";
 import { authReady } from '@/services/keycloak';
 
+/** Map a backend status code to the label the grid displays. */
+const mapBackendStatus = (status: string): string => {
+  const statusMap: Record<string, string> = {
+    'pending': 'Submitted',
+    'received': 'Awaiting Review',
+    'in-progress': 'Curation in Progress',
+    'in-review': 'In Review',
+    'missing-data': 'Missing Data',
+    'not-curatable': 'Not Curatable',
+    'in-portal': 'In Portal',
+    'approved': 'Released',
+    'rejected': 'Not Curatable'
+  };
+  return statusMap[status] || 'Submission';
+};
+
+/**
+ * Backend record -> the shape the grid and the filters expect.
+ *
+ * At module scope because the two load tracks below each transform their own
+ * response: the public list and the user's own submissions arrive separately
+ * and are merged after transformation, not before.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const toSubmission = (sub: any) => ({
+  submissionId: sub.id,
+  // Ownership signal — absent on public-projected records, which is what
+  // keeps other people's submissions out of the My Submissions tab.
+  userId: sub.userId,
+  status: sub.displayStatus || mapBackendStatus(sub.status),
+  title: sub.submissionType === 'suggest-paper' ? sub.paperTitle : (sub.studyName || sub.paperTitle),
+  author: sub.submitterName,
+  createdAt: sub.submittedAt,
+  submissionType: sub.submissionType,
+  publicationType: sub.publicationType,
+  // Contact
+  email: sub.submitterEmail,
+  alternativeEmail: sub.alternativeEmail,
+  canContactEmail: sub.canContactEmail,
+  // Study suggestion fields
+  pmid: sub.pmid,
+  paperTitle: sub.paperTitle,
+  journal: sub.journal,
+  authors: sub.authors,
+  publicationYear: sub.publicationYear,
+  isLeadAuthor: sub.isLeadAuthor,
+  wantsToHelpCurate: sub.wantsToHelpCurate,
+  // Data submission fields
+  studyName: sub.studyName,
+  studyDescription: sub.description,
+  curatedDataLink: sub.linkToData,
+  accessGranted: sub.accessGranted === true,
+  isDataTransformed: sub.isDataTransformed,
+  referenceGenome: sub.referenceGenome,
+  associatedPaper: sub.associatedPaper,
+  // Pre-publication
+  sharingPreference: sub.sharingPreference,
+  privateAccessEmails: sub.privateAccessEmails,
+  // Common
+  dataTypes: sub.dataTypes?.length > 0 ? sub.dataTypes.join(', ') : null,
+  notes: sub.notes,
+  supersededBy: sub.supersededBy || null,
+  supersededAt: sub.supersededAt || null,
+  curationNotes: sub.curationNotes || '',
+  curationNotesArray: sub.curationNotesArray || [],
+  curationNotesUpdatedAt: sub.curationNotesUpdatedAt || null,
+  submitterNotes: sub.submitterNotes || [],
+});
+
 const TrackStatus = () => {
   logger.debug("TrackStatus component rendering");
   
@@ -28,9 +97,12 @@ const TrackStatus = () => {
   const [userEmail, setUserEmail] = useState<string>('');
   const [userId, setUserId] = useState<string>('');
   const [isSuperUser, setIsSuperUser] = useState<boolean>(false);
-  // The profile request is independent of the submissions request. Until it
-  // lands there is no identity to filter "My Submissions" by, and rendering
-  // early would flash "No submissions found." at a user who has plenty.
+  // True once the session is fully resolved: Keycloak has settled and, if there
+  // was a token, the profile and the user's own submissions have come back.
+  // Only the two views that depend on identity wait for this — "My Submissions"
+  // has nothing to filter by until it lands, and pre-publication rows reach the
+  // client solely through the owner's own submissions. The published list does
+  // not, and renders as soon as the public response arrives.
   const [profileLoaded, setProfileLoaded] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [dataError, setDataError] = useState<boolean>(false);
@@ -42,157 +114,131 @@ const TrackStatus = () => {
   const preprintDataColumnDefs = usePreprintDataColumnDefs(isSuperUser);
   const mySubmissionsColumnDefs = useMySubmissionsColumnDefs(isSuperUser);
 
-  // Load submissions from backend
+  // Load submissions from backend.
+  //
+  // Two independent tracks, deliberately not chained. The public list needs no
+  // token, so it is requested immediately and rendered the moment it lands;
+  // anything requiring a session waits for Keycloak and is merged in behind it.
+  // Chaining them meant no row appeared until the auth handshake, the profile
+  // lookup and the submissions request had each completed in series.
   useEffect(() => {
-    const loadSubmissions = async () => {
+    let cancelled = false;
+
+    /**
+     * The signed-in user's record, or null when there is no usable session.
+     *
+     * Never rejects: a profile lookup that 401s or times out costs the role and
+     * the My Submissions identity, but the public submissions still render, so
+     * it must not take the page down with it.
+     */
+    const fetchProfile = async (token: string) => {
       try {
-        setIsLoading(true);
-        setDataError(false);
-        
-        // The app renders before Keycloak resolves, so the mirrored token may not
-        // exist yet. Reading it now would treat a signed-in user as anonymous and
-        // silently drop their own submissions from the merge below.
-        await authReady;
-        const token = localStorage.getItem('authToken');
-        setIsLoggedIn(!!token);
-
-        logger.debug("Fetching submissions from API");
-
-        // Determine role directly — don't rely on isSuperUser state (race condition)
-        let isSuper = false;
-        let tokenIsValid = !!token;
-        if (token) {
-          try {
-            const profileRes = await fetch(`${API_URL}/api/auth/profile`, {
-              headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (profileRes.status === 401) {
-              // Token is invalid or user not found — clear it and fall back to public
-              localStorage.removeItem('authToken');
-              tokenIsValid = false;
-              setIsLoggedIn(false);
-              logger.warn('Auth token invalid, falling back to public view');
-            } else {
-              const profileData = await profileRes.json();
-              if (profileData.status === 'success') {
-                isSuper = profileData.data.user.role === 'super';
-                // Feed the identity the "My Submissions" filter needs from this
-                // same response, instead of issuing a second identical request.
-                setUserEmail(profileData.data.user.email);
-                setUserId(profileData.data.user.id);
-                setIsSuperUser(isSuper);
-              }
-            }
-          } catch {
-            // Network error — keep token but fall back to public for this load
-            tokenIsValid = false;
-          }
+        const res = await fetch(`${API_URL}/api/auth/profile`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (res.status === 401) {
+          // Token is invalid or user not found — clear it and fall back to public
+          localStorage.removeItem('authToken');
+          if (!cancelled) setIsLoggedIn(false);
+          logger.warn('Auth token invalid, falling back to public view');
+          return null;
         }
-
-        // Super users see all; regular users merge own + public; guests get public only
-        let allSubmissions: any[] = [];
-        if (!tokenIsValid) {
-          const res = await getPublicSubmissions();
-          allSubmissions = res.data.submissions;
-        } else if (isSuper) {
-          const res = await getMySubmissions();
-          allSubmissions = res.data.submissions;
-        } else {
-          const [myRes, publicRes] = await Promise.all([getMySubmissions(), getPublicSubmissions()]);
-          const seen = new Set<string>();
-          for (const sub of [...myRes.data.submissions, ...publicRes.data.submissions]) {
-            if (!seen.has(sub.id)) { seen.add(sub.id); allSubmissions.push(sub); }
-          }
-        }
-        const response = { data: { submissions: allSubmissions } };
-        logger.log("Successfully fetched", response.data.submissions.length, "submissions");
-        
-        // Transform backend submissions to match expected format
-        const transformedSubmissions = response.data.submissions.map((sub: any) => ({
-          submissionId: sub.id,
-          // Ownership signal — absent on public-projected records, which is what
-          // keeps other people's submissions out of the My Submissions tab.
-          userId: sub.userId,
-          status: sub.displayStatus || mapBackendStatus(sub.status),
-          title: sub.submissionType === 'suggest-paper' ? sub.paperTitle : (sub.studyName || sub.paperTitle),
-          author: sub.submitterName,
-          createdAt: sub.submittedAt,
-          submissionType: sub.submissionType,
-          publicationType: sub.publicationType,
-          // Contact
-          email: sub.submitterEmail,
-          alternativeEmail: sub.alternativeEmail,
-          canContactEmail: sub.canContactEmail,
-          // Study suggestion fields
-          pmid: sub.pmid,
-          paperTitle: sub.paperTitle,
-          journal: sub.journal,
-          authors: sub.authors,
-          publicationYear: sub.publicationYear,
-          isLeadAuthor: sub.isLeadAuthor,
-          wantsToHelpCurate: sub.wantsToHelpCurate,
-          // Data submission fields
-          studyName: sub.studyName,
-          studyDescription: sub.description,
-          curatedDataLink: sub.linkToData,
-          accessGranted: sub.accessGranted === true,
-          isDataTransformed: sub.isDataTransformed,
-          referenceGenome: sub.referenceGenome,
-          associatedPaper: sub.associatedPaper,
-          // Pre-publication
-          sharingPreference: sub.sharingPreference,
-          privateAccessEmails: sub.privateAccessEmails,
-          // Common
-          dataTypes: sub.dataTypes?.length > 0 ? sub.dataTypes.join(', ') : null,
-          notes: sub.notes,
-          supersededBy: sub.supersededBy || null,
-          supersededAt: sub.supersededAt || null,
-          curationNotes: sub.curationNotes || '',
-          curationNotesArray: sub.curationNotesArray || [],
-          curationNotesUpdatedAt: sub.curationNotesUpdatedAt || null,
-          submitterNotes: sub.submitterNotes || [],
-        }));
-        
-        setSubmissions(transformedSubmissions);
-        setDataError(false);
-      } catch (error: any) {
-        logger.error("Error fetching submissions:", error);
-        
-        // More specific error messages
-        if (error.message?.includes('Failed to fetch') || error.message?.includes('Network')) {
-          toast.error("Cannot connect to server. Please check if the backend is running.");
-          setDataError(true);
-        } else if (error.message?.includes('429') || error.message?.includes('Too many')) {
-          toast.error("Too many requests — please wait a moment and refresh.");
-          // Don't show the full error screen for rate limiting, just show empty state
-        } else {
-          toast.error(`Failed to load submissions: ${error.message}`);
-          setDataError(true);
-        }
-      } finally {
-        setProfileLoaded(true);
-        setIsLoading(false);
+        const body = await res.json();
+        return body.status === 'success' ? body.data.user : null;
+      } catch {
+        // Network error — fall back to the public view for this load
+        return null;
       }
     };
 
-    loadSubmissions();
-  }, []);
+    // Track 1 — public submissions. Nothing to wait for, so this is in flight
+    // from the first render of the route.
+    getPublicSubmissions()
+      .then((res) => {
+        if (cancelled) return;
+        logger.log("Successfully fetched", res.data.submissions.length, "public submissions");
+        setSubmissions(res.data.submissions.map(toSubmission));
+        setDataError(false);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error("Error fetching submissions:", error);
 
-  // Helper function to map backend status to frontend display status
-  const mapBackendStatus = (status: string): string => {
-    const statusMap: Record<string, string> = {
-      'pending': 'Submitted',
-      'received': 'Awaiting Review',
-      'in-progress': 'Curation in Progress',
-      'in-review': 'In Review',
-      'missing-data': 'Missing Data',
-      'not-curatable': 'Not Curatable',
-      'in-portal': 'In Portal',
-      'approved': 'Released',
-      'rejected': 'Not Curatable'
-    };
-    return statusMap[status] || 'Submission';
-  };
+        // More specific error messages
+        if (message.includes('Failed to fetch') || message.includes('Network')) {
+          toast.error("Cannot connect to server. Please check if the backend is running.");
+          setDataError(true);
+        } else if (message.includes('429') || message.includes('Too many')) {
+          toast.error("Too many requests — please wait a moment and refresh.");
+          // Don't show the full error screen for rate limiting, just show empty state
+        } else {
+          toast.error(`Failed to load submissions: ${message}`);
+          setDataError(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    // Track 2 — everything that needs a session. The app renders before Keycloak
+    // resolves, so the mirrored token may not exist yet; reading it early would
+    // treat a signed-in user as anonymous and silently drop their own
+    // submissions. Within this track the profile and the user's own submissions
+    // are independent, so they go out together rather than one after the other.
+    authReady
+      .then(async () => {
+        const token = localStorage.getItem('authToken');
+        if (!cancelled) setIsLoggedIn(!!token);
+        if (!token) return;
+
+        const [profile, mine] = await Promise.all([
+          fetchProfile(token),
+          getMySubmissions().catch((e: unknown) => {
+            // An expired or revoked token fails only this half — the public
+            // response still renders the page.
+            logger.warn('Could not fetch own submissions:', e instanceof Error ? e.message : e);
+            return null;
+          }),
+        ]);
+        if (cancelled) return;
+
+        if (profile) {
+          setUserEmail(profile.email);
+          setUserId(profile.id);
+          setIsSuperUser(profile.role === 'super');
+        }
+
+        if (!mine) return;
+        const owned: Submission[] = mine.data.submissions.map(toSubmission);
+        logger.log("Merging", owned.length, "own submissions");
+
+        // Own rows first. Both responses can describe the same submission, and
+        // the owner's copy carries fields the public projection strips — userId
+        // above all, which is what the My Submissions filter matches on — so
+        // deduping by id with the owned copy first keeps the richer record.
+        //
+        // A super user's /api/submit response already contains every published
+        // row, so for them this collapses to exactly that set. That is what lets
+        // the role be discovered after both requests are already in flight,
+        // rather than gating them on it.
+        setSubmissions((prev) => {
+          const seen = new Set<string>();
+          const merged: Submission[] = [];
+          for (const sub of [...owned, ...prev]) {
+            if (sub.submissionId && seen.has(sub.submissionId)) continue;
+            if (sub.submissionId) seen.add(sub.submissionId);
+            merged.push(sub);
+          }
+          return merged;
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoaded(true);
+      });
+
+    return () => { cancelled = true; };
+  }, []);
 
   // Handle tab parameter from URL
   useEffect(() => {
@@ -312,22 +358,17 @@ const TrackStatus = () => {
   logger.debug("Filtered data submissions:", filteredDataSubmissions.length);
   logger.debug("Is loading:", isLoading);
 
-  // Show loading state
-  if (isLoading || !profileLoaded) {
-    return (
-      <SharedLayout>
-        <div className="min-h-screen bg-gradient-to-b from-blue-50/50 to-white py-12">
-          <div className="w-full px-4 sm:px-6">
-            <div className="bg-white rounded-lg shadow-md p-12 text-center max-w-2xl mx-auto">
-              <div className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent mb-4"></div>
-              <h2 className="text-xl font-semibold text-gray-800 mb-2">Loading your submissions...</h2>
-              <p className="text-gray-600">Please wait while we fetch your data.</p>
-            </div>
-          </div>
-        </div>
-      </SharedLayout>
-    );
-  }
+  // Loading is shown inside the grid area rather than in place of the page. The
+  // heading, tabs and search box do not depend on any request, so returning a
+  // full-screen spinner from here held the entire route hostage to the slowest
+  // of them — for an anonymous visitor, to an auth handshake whose answer the
+  // page then never used.
+  const gridLoading = (
+    <div className="text-center py-12">
+      <div className="inline-block h-10 w-10 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent mb-4"></div>
+      <p className="text-gray-500">Loading submissions...</p>
+    </div>
+  );
 
   // Show error state if data failed to load
   if (dataError) {
@@ -378,15 +419,18 @@ const TrackStatus = () => {
                   className="w-full lg:w-auto"
                 >
                   <TabsList className={`grid w-full lg:w-auto lg:inline-grid ${isLoggedIn ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                    {/* Counts appear once the rows they describe are in. Showing
+                        "(0)" against a list still loading reads as an answer
+                        rather than as a wait. */}
                     <TabsTrigger value="suggested-papers" className="text-base font-semibold">
-                      Published ({publishedPapers.length + publishedData.length})
+                      Published{isLoading ? '' : ` (${publishedPapers.length + publishedData.length})`}
                     </TabsTrigger>
                     <TabsTrigger value="submitted-data" className="text-base font-semibold">
-                      Pre-publication ({preprintData.length})
+                      Pre-publication{isLoading ? '' : ` (${preprintData.length})`}
                     </TabsTrigger>
                     {isLoggedIn && (
                       <TabsTrigger value="my-submissions" className="text-base font-semibold">
-                        My Submissions ({mySubmissions.length})
+                        My Submissions{profileLoaded ? ` (${mySubmissions.length})` : ''}
                       </TabsTrigger>
                     )}
                   </TabsList>
@@ -416,7 +460,10 @@ const TrackStatus = () => {
               {/* Content based on active tab */}
               {activeTab === "suggested-papers" && (
                 <div>
-                  {filteredPaperSubmissions.length === 0 && filteredDataSubmissions.length === 0 ? (
+                  {/* Every published row is in the public response, so this tab
+                      is complete as soon as track 1 lands — it never waits on
+                      the session. */}
+                  {isLoading ? gridLoading : filteredPaperSubmissions.length === 0 && filteredDataSubmissions.length === 0 ? (
                     <div className="text-center py-12">
                       <p className="text-gray-500 text-lg">No published submissions found.</p>
                       <p className="text-gray-400 text-sm mt-2">Submit your first paper or dataset to see it here!</p>
@@ -461,7 +508,11 @@ const TrackStatus = () => {
               )}
               {activeTab === "submitted-data" && (
                 <div>
-                  {filteredPaperSubmissions.length === 0 && filteredDataSubmissions.length === 0 ? (
+                  {/* Unlike the published tab, this one is not complete until the
+                      session is known: a preprint reaches the client only via
+                      the owner's own submissions, so showing the public-only
+                      answer first would tell a signed-in user they have none. */}
+                  {isLoading || !profileLoaded ? gridLoading : filteredPaperSubmissions.length === 0 && filteredDataSubmissions.length === 0 ? (
                     <div className="text-center py-12">
                       <p className="text-gray-500 text-lg">No pre-publication submissions found.</p>
                       <p className="text-gray-400 text-sm mt-2">
@@ -528,7 +579,10 @@ const TrackStatus = () => {
                     return (paperCount > 0 || dataCount > 0) ? <SubmissionProgressKey trackType={trackType} /> : null;
                   })()}
 
-                  {filteredMySubmissions.length === 0 ? (
+                  {/* Until the profile lands there is no identity to match on, so
+                      the filter below returns nothing — which would read as
+                      "you have none" to a user who has plenty. */}
+                  {!profileLoaded ? gridLoading : filteredMySubmissions.length === 0 ? (
                     <div className="text-center py-12">
                       <p className="text-gray-500 text-lg">No submissions found.</p>
                       <p className="text-gray-400 text-sm mt-2">Your submitted papers and datasets will appear here.</p>

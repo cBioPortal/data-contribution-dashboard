@@ -11,8 +11,12 @@ const fetchApi = async (endpoint: string, options: RequestInit = {}) => {
 
   const headers: HeadersInit = {};
 
-  // Only set Content-Type for non-FormData requests
-  if (!isFormData) {
+  // Only declare a JSON body when there actually is one. Setting Content-Type on
+  // a bodyless GET makes it a non-simple cross-origin request, so the browser
+  // inserts a preflight OPTIONS round trip ahead of every read — the reads on
+  // this page are on the critical path, and none of them carry a body.
+  // (FormData sets its own Content-Type, boundary included, so never override it.)
+  if (options.body !== undefined && !isFormData) {
     headers["Content-Type"] = "application/json";
   }
 

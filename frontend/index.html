@@ -17,6 +17,33 @@
     <!-- Runtime configuration, rewritten from container env vars on startup.
          Must load before the app bundle so window.__ENV__ exists. See src/config.ts. -->
     <script src="/config.js"></script>
+
+    <!-- Warm the connection to the identity provider while the bundle downloads.
+         Keycloak's silent check-sso is the first thing that gates authenticated
+         views, and its first iframe pays DNS + TCP + TLS before a single byte
+         comes back — about 0.35s against keycloak.cbioportal.org.
+
+         Read from window.__ENV__ rather than hardcoding a host, so one image
+         still works across environments (see docker-entrypoint.sh). No
+         crossorigin attribute: the first request is an iframe document load,
+         which is not a CORS request, so an anonymous connection would not be
+         reused for it. -->
+    <script>
+      (function () {
+        try {
+          var url = (window.__ENV__ || {}).VITE_KEYCLOAK_URL;
+          if (!url) return;
+          var origin = new URL(url, location.href).origin;
+          if (origin === location.origin) return;
+          var link = document.createElement('link');
+          link.rel = 'preconnect';
+          link.href = origin;
+          document.head.appendChild(link);
+        } catch (e) {
+          /* A malformed or missing URL just means no hint; never block startup. */
+        }
+      })();
+    </script>
   </head>
 
   <body>
