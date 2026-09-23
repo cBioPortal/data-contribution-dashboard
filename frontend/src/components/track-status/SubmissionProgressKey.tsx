@@ -12,7 +12,7 @@ interface SubmissionProgressKeyProps {
 const stepColors: Record<string, { bg: string; text: string }> = {
   'Submitted':              { bg: 'bg-gray-200',   text: 'text-gray-600' },
   'Initial Review':         { bg: 'bg-sky-200',    text: 'text-sky-800' },
-  'Approved for Portal':    { bg: 'bg-green-200',  text: 'text-green-800' },
+  'Approved for Curation':  { bg: 'bg-green-200',  text: 'text-green-800' },
   'Curation in Progress':   { bg: 'bg-yellow-200', text: 'text-yellow-800' },
   'Final Review':           { bg: 'bg-orange-200', text: 'text-orange-800' },
   'In Review':              { bg: 'bg-orange-200', text: 'text-orange-800' },

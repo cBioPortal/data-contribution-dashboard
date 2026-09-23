@@ -25,10 +25,22 @@ import path from "path";
  * imports from there.
  */
 function preloadCurrentRoute(): Plugin {
-  const ROUTES: Record<string, { chunk: string; src: string }> = {
-    "/track-status": { chunk: "TrackStatus", src: "/src/pages/TrackStatus.tsx" },
-    "/analytics": { chunk: "Analytics", src: "/src/pages/Analytics.tsx" },
-    "/submit": { chunk: "SubmitContent", src: "/src/pages/SubmitContent.tsx" },
+  // A route may need more than its own chunk. /track-status splits the grid out
+  // so the heading, tabs and search paint off ~10 kB instead of ~300 kB, but the
+  // grid is still wanted immediately — naming it here means it downloads
+  // alongside the route rather than being discovered a round trip later, which
+  // is the very cost this plugin exists to avoid.
+  //
+  // Only chunks worth having *now* belong here. The landing page's chart, for
+  // instance, is lazy precisely because it is below the fold, and preloading it
+  // would undo that.
+  const ROUTES: Record<string, { chunks: string[]; src: string[] }> = {
+    "/track-status": {
+      chunks: ["TrackStatus", "SubmissionGrid"],
+      src: ["/src/pages/TrackStatus.tsx", "/src/components/track-status/SubmissionGrid.tsx"],
+    },
+    "/analytics": { chunks: ["Analytics"], src: ["/src/pages/Analytics.tsx"] },
+    "/submit": { chunks: ["SubmitContent"], src: ["/src/pages/SubmitContent.tsx"] },
   };
 
   // One index.html serves every route, so which hints apply is a runtime
@@ -53,12 +65,13 @@ function preloadCurrentRoute(): Plugin {
     transformIndexHtml(html, ctx) {
       // Build: the hashed chunk names exist only on the emitted bundle.
       if (ctx.bundle) {
+        const emitted = Object.keys(ctx.bundle);
         const map: Record<string, string[]> = {};
-        for (const [routePath, { chunk }] of Object.entries(ROUTES)) {
-          const pattern = new RegExp(`^assets/${chunk}-[\\w-]+\\.(js|css)$`);
-          const files = Object.keys(ctx.bundle)
-            .filter((file) => pattern.test(file))
-            .map((file) => `/${file}`);
+        for (const [routePath, { chunks }] of Object.entries(ROUTES)) {
+          const files = chunks.flatMap((chunk) => {
+            const pattern = new RegExp(`^assets/${chunk}-[\\w-]+\\.(js|css)$`);
+            return emitted.filter((file) => pattern.test(file)).map((file) => `/${file}`);
+          });
           if (files.length) map[routePath] = files;
         }
         return inject(html, map);
@@ -69,7 +82,7 @@ function preloadCurrentRoute(): Plugin {
       // — costs one redundant fetch of an already-warm module, never a stale
       // one, because the import itself still resolves normally.
       const map = Object.fromEntries(
-        Object.entries(ROUTES).map(([routePath, { src }]) => [routePath, [src]]),
+        Object.entries(ROUTES).map(([routePath, { src }]) => [routePath, src]),
       );
       return inject(html, map);
     },

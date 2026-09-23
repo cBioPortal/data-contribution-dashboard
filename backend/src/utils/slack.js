@@ -78,20 +78,52 @@ export function notifyNewSubmission(submission) {
 }
 
 /**
- * Notify: submitter added a note to their submission
+ * A question or reply from outside the curation team.
+ *
+ * Replaces notifyNoteAdded, which lost its caller when submitter notes moved out
+ * of the submission document. Curators get Slack; there is no mailer yet, so the
+ * person who asked is told nothing — which is the gap to close before public
+ * questions are worth advertising.
  */
-export function notifyNoteAdded(submissionId, noteText, submitterEmail, submissionTitle) {
-  const truncated = noteText.length > 300
-    ? noteText.substring(0, 300) + '...'
-    : noteText;
+export function notifyQuestion({ submissionId, title, body, askedBy, visibility, isReply }) {
+  const truncated = body.length > 300 ? body.substring(0, 300) + '...' : body;
 
   const lines = [
-    `💬 *Note Added to Submission*`,
+    isReply ? '💬 *Reply on a question*' : '❓ *New question*',
     `*ID:* ${shortId(submissionId)}`,
-    `*Submission:* ${submissionTitle || submissionId}`,
-    `*By:* ${submitterEmail}`,
-    `*Note:* ${truncated}`,
+    `*Submission:* ${title || submissionId}`,
+    `*From:* ${askedBy}`,
+    `*Visible to:* ${visibility === 'private' ? 'submitter & curation team' : 'everyone'}`,
+    `*Message:* ${truncated}`,
   ];
 
   return sendSlackNotification(lines.join('\n'));
+}
+
+export function notifyCurationVolunteer({
+  submissionId,
+  title,
+  name,
+  email,
+  designation,
+  currentWork,
+}) {
+  const lines = [
+    '🙋 *New community curation interest*',
+    `*ID:* ${shortId(submissionId)}`,
+    `*Submission:* ${title || submissionId}`,
+    `*Interested user:* ${name} (${email})`,
+    `*Designation:* ${designation}`,
+    `*Currently:* ${currentWork}`,
+  ];
+  return sendSlackNotification(lines.join('\n'));
+}
+
+export function notifyCurationReviewRequested({ submissionId, title, name }) {
+  return sendSlackNotification([
+    '✅ *Community curation ready for review*',
+    `*ID:* ${shortId(submissionId)}`,
+    `*Submission:* ${title || submissionId}`,
+    `*Community Curator:* ${name}`,
+  ].join('\n'));
 }

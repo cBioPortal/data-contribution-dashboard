@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import SharedLayout from "@/components/SharedLayout";
 import { FaGoogle, FaGithub } from "react-icons/fa";
@@ -9,7 +9,18 @@ import { authReady } from '@/services/keycloak';
 
 const Login = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [user, setUser] = useState<{ email: string; name: string } | null>(null);
+  const requestedReturnTo = searchParams.get('returnTo');
+  const returnTo = (() => {
+    if (!requestedReturnTo || !requestedReturnTo.startsWith('/') || requestedReturnTo.startsWith('//')) {
+      return '/';
+    }
+    const url = new URL(requestedReturnTo, window.location.origin);
+    return url.origin === window.location.origin
+      ? `${url.pathname}${url.search}${url.hash}`
+      : '/';
+  })();
 
   useEffect(() => {
     // Check if user is already logged in, once Keycloak has resolved.
@@ -25,7 +36,11 @@ const Login = () => {
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') {
-          setUser(data.data.user);
+          if (returnTo !== '/') {
+            navigate(returnTo, { replace: true });
+          } else {
+            setUser(data.data.user);
+          }
         } else {
           localStorage.removeItem('authToken');
         }
@@ -35,16 +50,16 @@ const Login = () => {
       });
     }
     });
-  }, []);
+  }, [navigate, returnTo]);
 
   // Login is handled by Keycloak. The idpHint routes straight to the chosen
   // identity provider; without it, Keycloak shows its own login page.
   const handleGoogleLogin = () => {
-    kcLogin('google');
+    kcLogin('google', returnTo);
   };
 
   const handleGithubLogin = () => {
-    kcLogin('github');
+    kcLogin('github', returnTo);
   };
 
   const handleLogout = () => {
@@ -53,7 +68,7 @@ const Login = () => {
   };
 
   const handleGoToDashboard = () => {
-    navigate('/');
+    navigate(returnTo);
   };
 
   if (user) {

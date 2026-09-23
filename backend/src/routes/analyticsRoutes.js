@@ -7,12 +7,68 @@
 
 import express from 'express';
 import fetch from 'node-fetch';
-import { clickhouseClient } from '../db/index.js';
+import { clickhouseClient, query } from '../db/index.js';
 import { listSubmissions } from '../db/submissions.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
+
+router.get('/community-contributions', async (req, res) => {
+  try {
+    const [totalsResult, trendResult] = await Promise.all([
+      query(
+        `SELECT count(*)::int AS completed_curations,
+                count(DISTINCT user_id)::int AS contributors
+           FROM curation_volunteers
+          WHERE status = 'completed'`,
+      ),
+      query(
+        `WITH months AS (
+           SELECT generate_series(
+             date_trunc('month', CURRENT_DATE) - INTERVAL '5 months',
+             date_trunc('month', CURRENT_DATE),
+             INTERVAL '1 month'
+           ) AS month
+         )
+         SELECT to_char(months.month, 'YYYY-MM') AS month,
+                count(cv.id)::int AS completed_curations
+           FROM months
+           LEFT JOIN curation_volunteers cv
+             ON cv.status = 'completed'
+            AND cv.updated_at >= months.month
+            AND cv.updated_at < months.month + INTERVAL '1 month'
+          GROUP BY months.month
+          ORDER BY months.month`,
+      ),
+    ]);
+    res.json({
+      status: 'success',
+      data: {
+        completedCurations: totalsResult.rows[0]?.completed_curations ?? 0,
+        contributors: totalsResult.rows[0]?.contributors ?? 0,
+        monthlyTrend: trendResult.rows.map(row => ({
+          month: row.month,
+          completedCurations: row.completed_curations,
+        })),
+      },
+    });
+  } catch (error) {
+    logger.error('Community contribution analytics error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to load community contribution metrics',
+    });
+  }
+});
 const CH_DB = process.env.CLICKHOUSE_DATABASE || 'cbioportal_public_blue';
+
+const STUDY_SAMPLE_COUNTS_QUERY = `
+  SELECT cs.cancer_study_identifier AS studyId, count(*) AS sampleCount
+  FROM ${CH_DB}.sample s
+  JOIN ${CH_DB}.patient p ON s.patient_id = p.internal_id
+  JOIN ${CH_DB}.cancer_study cs ON p.cancer_study_id = cs.cancer_study_id
+  GROUP BY cs.cancer_study_identifier
+`;
 
 // Year extraction SQL expression — exactly mirrors frontend extractYearFromStudy():
 // 1. Parse year from citation
@@ -83,11 +139,7 @@ router.get('/cancer-type-samples', async (req, res) => {
 router.get('/study-sample-counts', async (req, res) => {
   try {
     const result = await clickhouseClient.query({
-      query: `
-        SELECT cancer_study_identifier AS studyId, count(*) AS sampleCount
-        FROM ${CH_DB}.sample_derived
-        GROUP BY cancer_study_identifier
-      `,
+      query: STUDY_SAMPLE_COUNTS_QUERY,
       format: 'JSONEachRow',
     });
 
@@ -195,18 +247,14 @@ router.get('/cumulative-growth', async (req, res) => {
         .then(r => r.json()),
       clickhouseClient
         .query({
-          query: `
-            SELECT cancer_study_identifier AS studyId, count(*) AS cnt
-            FROM ${CH_DB}.sample_derived
-            GROUP BY cancer_study_identifier
-          `,
+          query: STUDY_SAMPLE_COUNTS_QUERY,
           format: 'JSONEachRow',
         })
         .then(r => r.json()),
     ]);
 
     const sampleCounts = {};
-    sampleRows.forEach(r => { sampleCounts[r.studyId] = Number(r.cnt); });
+    sampleRows.forEach(r => { sampleCounts[r.studyId] = Number(r.sampleCount); });
 
     const perYear = {}; // year -> { studies, samples }
     let unknownYearCount = 0;
@@ -417,7 +465,7 @@ async function loadAllSubmissions() {
 const PIPELINE_STAGES = [
   'Submitted',
   'Initial Review',
-  'Approved for Portal',
+  'Approved for Curation',
   'Curation in Progress',
   'Final Review',
   'Preparing for Release',
@@ -427,7 +475,7 @@ const PIPELINE_STAGES = [
 function normalizeStatus(raw) {
   const s = (raw || '').trim();
   if (!s || s === 'pending' || s === 'received' || s === 'Awaiting Review') return 'Submitted';
-  if (s === 'Approved for Portal Curation') return 'Approved for Portal';
+  if (s === 'Approved for Portal Curation' || s === 'Approved for Portal') return 'Approved for Curation';
   if (['Clarification Needed', 'Changes Requested', "Awaiting Submitter's Response",
        'Awaiting Submitters Response', 'In Progress', 'in-progress'].includes(s)) return 'Curation in Progress';
   if (s === 'Import in Progress') return 'Preparing for Release';

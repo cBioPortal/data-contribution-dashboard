@@ -14,9 +14,28 @@ export interface Submission {
   submissionType?: 'suggest-paper' | 'submit-data';
   pmid?: string;
   // Stored as an array in the submission document, not a string.
-  dataTypes?: string[];
+  dataTypes?: string[] | string;
   referenceGenome?: string;
   associatedPaper?: string;
+  paperTitle?: string;
+  authors?: string;
+  publicationYear?: string;
+  isLeadAuthor?: boolean | null;
+  wantsToHelpCurate?: string;
+  alternativeEmail?: string;
+  canContactEmail?: boolean;
+  accessGranted?: boolean;
+  isDataTransformed?: boolean | null;
+  privateAccessEmails?: string;
+  portalStudyUrl?: string | null;
+  leadCuratorId?: string | null;
+  leadCuratorName?: string | null;
+  volunteerCount?: number;
+  curationInterestAccepted?: boolean;
+  hasVolunteered?: boolean;
+  myVolunteerStatus?: 'pending' | 'accepted' | 'completed' | 'declined' | 'withdrawn' | null;
+  upvoteCount?: number;
+  hasUpvoted?: boolean;
   publicationType?: 'published' | 'preprint';
   sharingPreference?: 'public' | 'private';
   // Legacy fields for backward compatibility
@@ -31,6 +50,11 @@ export interface Submission {
   studyDescription?: string;
   curatedDataLink?: string;
   curationNotes?: string;
+  questionCount?: number;
+  needsResponseCount?: number;
+  latestQuestionActivityAt?: string | null;
+  supersededBy?: string | null;
+  supersededAt?: string | null;
   submitterNotes?: Array<{ text: string; addedAt: string; addedBy: string }>;
 }
 
@@ -42,6 +66,7 @@ const statusColors: Record<string, string> = {
   "Received": "bg-gray-200 text-gray-700",
   "Initial Review": "bg-sky-200 text-sky-800",
   "Pending Review": "bg-sky-200 text-sky-800",
+  "Approved for Curation": "bg-green-200 text-green-800",
   "Approved for Portal Curation": "bg-green-200 text-green-800",
   "Approved for Portal": "bg-green-200 text-green-800",
   "Curation in Progress": "bg-yellow-200 text-yellow-800",
@@ -65,7 +90,7 @@ const statusDescriptions: Record<string, string> = {
   "Awaiting Review": "We quickly check if the paper has enough data to move forward.",
   "In Review": "We are working to prepare and organize your data for the portal.",
   "Clarification Needed": "We are working to prepare and organize your data for the portal.",
-  "Approved for Portal": "Your data is approved for curation into cBioPortal.",
+  "Approved for Curation": "Your data is approved for curation into cBioPortal.",
   "Preparing for Release": "We are getting ready to make your data public.",
   "Import in Progress": "We are getting ready to make your data public.",
   "Released": "Your data is now live on the portal!",
@@ -75,12 +100,12 @@ const statusDescriptions: Record<string, string> = {
 // Helper function to get step number for status
 const getStepNumber = (status: string, trackType: 'suggested-papers' | 'submitted-data' = 'suggested-papers') => {
   const suggestedPapersNormalFlow = [
-    'Submitted', 'Initial Review', 'Approved for Portal', 'Curation in Progress',
+    'Submitted', 'Initial Review', 'Approved for Curation', 'Curation in Progress',
     'Final Review', 'Preparing for Release', 'Released'
   ];
 
   const submittedDataNormalFlow = [
-    'Submitted', 'Initial Review', 'Approved for Portal', 'Curation in Progress',
+    'Submitted', 'Initial Review', 'Approved for Curation', 'Curation in Progress',
     'Final Review', 'Preparing for Release', 'Released'
   ];
 
@@ -95,7 +120,7 @@ const getStepNumber = (status: string, trackType: 'suggested-papers' | 'submitte
     }
     if (['Import in Progress'].includes(status)) return 'Preparing for Release';
     if (status === 'Under Review') return 'Final Review';
-    if (status === 'Approved for Portal Curation') return 'Approved for Portal';
+    if (status === 'Approved for Portal Curation' || status === 'Approved for Portal') return 'Approved for Curation';
     if (status === 'In Portal') return 'Released';
     return status;
   };

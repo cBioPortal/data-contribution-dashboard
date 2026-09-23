@@ -10,7 +10,7 @@ import { fetchPipelineFunnel } from '@/services/cbioportalApi';
 const STAGE_COLORS: Record<string, string> = {
   'Submitted':             '#7570b3',
   'Initial Review':        '#1b9e77',
-  'Approved for Portal':   '#66a61e',
+  'Approved for Curation': '#66a61e',
   'Curation in Progress':  '#d95f02',
   'Final Review':          '#e6ab02',
   'Preparing for Release': '#a6761d',

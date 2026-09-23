@@ -6,6 +6,23 @@
  *   Layer 2 — Title similarity via token overlap (soft warning)
  */
 
+/**
+ * Drop the version marker bioRxiv and medRxiv append to a preprint URL.
+ *
+ * `10.1101/2020.03.20.000141v1` is a link to one revision; the DOI of the
+ * preprint itself is `10.1101/2020.03.20.000141`. Kept, the suffix gave every
+ * revision its own identifier — so v1 and v2 of one preprint never matched each
+ * other, nor the bare DOI — and resolved to nothing upstream.
+ *
+ * Scoped to the 10.1101 prefix on purpose: a trailing "v1" is a versioning
+ * convention there, but could be a legitimate part of a DOI from any other
+ * registrant.
+ */
+function stripPreprintVersion(doi) {
+  if (!doi.startsWith('10.1101/')) return doi;
+  return doi.replace(/v\d+(?:\.[a-z.-]+)?$/i, '');
+}
+
 // ─── Identifier normalizer ───────────────────────────────────────────────────
 // Extracts a canonical identifier from PMIDs, DOIs, PubMed URLs, journal URLs,
 // or generic data-source URLs. Used for hard duplicate detection.
@@ -14,10 +31,26 @@ export function normalizeIdentifier(raw) {
   const s = raw.trim();
   if (!s) return null;
 
+  // Nature URLs carry the article id, never the DOI — /articles/s41588-023-01355-5
+  // or the legacy /articles/nature11412 — so the earlier rule here, which looked
+  // for `10.` after /articles/, matched a URL shape Nature has never published.
+  // Every one of those links fell through to the generic branch below and became
+  // an opaque string, invisible to duplicate detection and unresolvable by the
+  // lookup. Springer Nature mints these ids as 10.1038/<id>, so the DOI is
+  // recoverable by prefixing.
+  const nature = s.match(/(?:https?:\/\/)?(?:www\.)?nature\.com\/articles\/([^\s?#]+)/i);
+  if (nature) {
+    const path = nature[1].replace(/\/+$/, '');
+    // A DOI written into the path keeps its slash; an article id is the first
+    // segment alone, so a trailing /figures/1 or /tables/2 is discarded rather
+    // than glued onto the DOI.
+    const doi = path.startsWith('10.') ? path : `10.1038/${path.split('/')[0]}`;
+    return 'doi:' + stripPreprintVersion(doi.toLowerCase());
+  }
+
   // Extract DOI from journal URLs and doi.org
   const doiPatterns = [
     /(?:https?:\/\/)?(?:www\.)?doi\.org\/(10\.[^\s]+)/i,
-    /(?:https?:\/\/)?(?:www\.)?nature\.com\/articles\/(10\.[^\s\/]+[^\s]*)/i,
     /(?:https?:\/\/)?(?:www\.)?nejm\.org\/doi\/(10\.[^\s]+)/i,
     /(?:https?:\/\/)?(?:www\.)?science\.org\/doi\/(10\.[^\s]+)/i,
     /(?:https?:\/\/)?(?:www\.)?aacrjournals\.org\/[^\/]+\/article\/(10\.[^\s]+)/i,
@@ -26,7 +59,7 @@ export function normalizeIdentifier(raw) {
   ];
   for (const re of doiPatterns) {
     const m = s.match(re);
-    if (m) return 'doi:' + m[1].toLowerCase().replace(/\/+$/, '');
+    if (m) return 'doi:' + stripPreprintVersion(m[1].toLowerCase().replace(/\/+$/, ''));
   }
 
   // PubMed URLs

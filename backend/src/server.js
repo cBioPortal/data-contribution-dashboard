@@ -11,6 +11,7 @@ import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import submitRoutes from './routes/submitRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
+import lookupRoutes from './routes/lookupRoutes.js';
 import logger from './utils/logger.js';
 
 const app = express();
@@ -65,6 +66,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/submit', submitRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/lookup', lookupRoutes);
 
 // 404
 app.use((req, res) => {

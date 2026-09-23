@@ -59,6 +59,45 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 let markAuthReady: () => void;
 export const authReady = new Promise<void>((resolve) => { markAuthReady = resolve; });
 
+let authSettled = false;
+void authReady.then(() => { authSettled = true; });
+
+export interface TokenIdentity {
+  email: string;
+  isSuperUser: boolean;
+}
+
+/**
+ * Identity taken from the access token itself, read synchronously.
+ *
+ * Role and email are claims Keycloak has already signed, and the API derives the
+ * role from exactly these — see middleware/auth.js, which reads
+ * `realm_access.roles` and checks for `super`. Asking /api/auth/profile for them
+ * spends a round trip re-answering a question the token has already answered,
+ * and the answer arrives after the grids have rendered, so every one of them is
+ * torn down and rebuilt when it lands.
+ *
+ * The app's own user id is deliberately not here: the token carries Keycloak's
+ * `sub`, not the row id the API assigns, so that still comes from the profile
+ * endpoint — it just no longer gates anything visible.
+ *
+ * Returns `undefined` while Keycloak is still resolving, `null` once it has
+ * resolved with no session. Callers must not read `undefined` as "logged out".
+ */
+export function tokenIdentity(): TokenIdentity | null | undefined {
+  if (!authSettled) return undefined;
+  if (!keycloak.authenticated || !keycloak.tokenParsed) return null;
+
+  const claims = keycloak.tokenParsed as {
+    email?: string;
+    realm_access?: { roles?: string[] };
+  };
+  return {
+    email: claims.email ?? '',
+    isSuperUser: claims.realm_access?.roles?.includes('super') ?? false,
+  };
+}
+
 let initialized = false;
 
 /** Initialize Keycloak once. Uses check-sso so login stays optional. */
@@ -125,10 +164,14 @@ export async function ensureFreshToken(minValiditySeconds = 60): Promise<string 
   }
 }
 
-/** Start login. Pass an idpHint to jump straight to Google/GitHub. */
-export function login(idpHint?: 'google' | 'github') {
+/** Start login. Pass a same-origin path to return to the current workflow. */
+export function login(idpHint?: 'google' | 'github', returnPath = '/') {
+  const requestedUrl = new URL(returnPath, window.location.origin);
+  const redirectUri = requestedUrl.origin === window.location.origin
+    ? requestedUrl.toString()
+    : `${window.location.origin}/`;
   return keycloak.login({
-    redirectUri: `${window.location.origin}/`,
+    redirectUri,
     ...(idpHint ? { idpHint } : {}),
   });
 }

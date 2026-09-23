@@ -2,8 +2,11 @@
 import { ColDef, ColGroupDef } from "ag-grid-community";
 import { getStatusCellRenderer } from "@/types/submission";
 import React from "react";
-import { ChevronDown, ArrowUpDown } from "lucide-react";
+import { ChevronDown, ArrowUpDown, ThumbsUp } from "lucide-react";
+import { toast } from "sonner";
 import { updateSubmissionStatus } from "@/services/api";
+import { formatSubmissionDate } from "@/utils/submissionDate";
+import { isVolunteerSignupOpen } from "@/utils/curationEligibility";
 
 type ColumnDef = ColDef | ColGroupDef;
 
@@ -58,10 +61,15 @@ const submissionIdRenderer = (params: any) => {
   const raw = params.value || '';
   const full = raw.replace(/^submission_/, '');
   const short = full.substring(0, 8);
-  return React.createElement('div', {
-    className: 'flex items-center gap-1 cursor-pointer hover:text-blue-600 w-full',
+  const expanded = params.context?.selectedSubmissionId === raw;
+
+  return React.createElement('button', {
+    type: 'button',
+    className: 'flex items-center gap-1 cursor-pointer hover:text-blue-700 w-full text-left',
     style: { maxWidth: '100%' },
-    title: full
+    title: `${expanded ? 'Collapse' : 'Expand'} details for submission ${full}`,
+    'aria-label': `${expanded ? 'Collapse' : 'Expand'} details for submission ${full}`,
+    'aria-expanded': expanded,
   }, [
     React.createElement('span', {
       key: 'id',
@@ -69,24 +77,15 @@ const submissionIdRenderer = (params: any) => {
     }, short),
     React.createElement(ChevronDown, {
       key: 'arrow',
-      className: 'h-4 w-4 text-gray-500 flex-shrink-0'
+      className: `h-4 w-4 text-gray-500 flex-shrink-0 transition-transform duration-200 ${
+        expanded ? 'rotate-180' : ''
+      }`
     })
   ]);
 };
 
-// Format date to EST 24hr clock
-const dateESTRenderer = (params: any) => {
-  if (!params.value) return React.createElement('div', {}, '');
-  const date = new Date(params.value);
-  const formatted = date.toLocaleString('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  }) + ' EST';
+const submissionDateRenderer = (params: any) => {
+  const formatted = formatSubmissionDate(params.value) || '';
   return React.createElement('div', {
     className: 'w-full truncate',
     title: formatted
@@ -108,16 +107,14 @@ const idCol: ColumnDef = {
 export const ASSIGNABLE_STATUSES = [
   { group: 'Step 1 — Submitted',             value: 'Submitted' },
   { group: 'Step 2 — Initial Review',         value: 'Initial Review' },
-  { group: 'Step 3 — Approved for Portal',    value: 'Approved for Portal' },
+  { group: 'Step 3 — Approved for Curation',  value: 'Approved for Curation' },
   { group: 'Step 4 — Curation in Progress',   value: 'Curation in Progress' },
   { group: 'Step 4 — Curation in Progress',   value: 'Clarification Needed' },
   { group: 'Step 4 — Curation in Progress',   value: 'Changes Requested' },
   { group: "Step 4 — Curation in Progress",   value: "Awaiting Submitter's Response" },
   { group: 'Step 5 — Final Review',           value: 'Final Review' },
   { group: 'Step 6 — Preparing for Release',  value: 'Preparing for Release' },
-  { group: 'Step 6 — Preparing for Release',  value: 'Import in Progress' },
   { group: 'Step 7 — Released',               value: 'Released' },
-  { group: 'Step 7 — Released',               value: 'In Portal' },
   { group: 'Rejected',                        value: 'Not Curatable' },
   { group: 'Rejected',                        value: 'Missing Data' },
 ];
@@ -127,16 +124,14 @@ const BACKEND_MAP: Record<string, string> = {
   'Submitted': 'pending',
   'Submission': 'pending',
   'Initial Review': 'received',
-  'Approved for Portal': 'received',
+  'Approved for Curation': 'received',
   'Curation in Progress': 'in-progress',
   'Clarification Needed': 'in-progress',
   'Changes Requested': 'in-progress',
   "Awaiting Submitter's Response": 'in-progress',
   'Final Review': 'in-review',
   'Preparing for Release': 'in-review',
-  'Import in Progress': 'in-review',
   'Released': 'approved',
-  'In Portal': 'in-portal',
   'Not Curatable': 'not-curatable',
   'Missing Data': 'missing-data',
 };
@@ -149,6 +144,7 @@ const PILL_COLORS: Record<string, { bg: string; text: string }> = {
   'Received':                      { bg: '#e5e7eb', text: '#374151' },
   'Initial Review':                { bg: '#bae6fd', text: '#075985' },
   'Pending Review':                { bg: '#bae6fd', text: '#075985' },
+  'Approved for Curation':         { bg: '#bbf7d0', text: '#14532d' },
   'Approved for Portal':           { bg: '#bbf7d0', text: '#14532d' },
   'Approved for Portal Curation':  { bg: '#bbf7d0', text: '#14532d' },
   'Curation in Progress':          { bg: '#fef08a', text: '#713f12' },
@@ -160,36 +156,10 @@ const PILL_COLORS: Record<string, { bg: string; text: string }> = {
   'In Review':                     { bg: '#fed7aa', text: '#7c2d12' },
   'Under Review':                  { bg: '#fed7aa', text: '#7c2d12' },
   'Preparing for Release':         { bg: '#99f6e4', text: '#134e4a' },
-  'Import in Progress':            { bg: '#99f6e4', text: '#134e4a' },
   'Released':                      { bg: '#166534', text: '#f0fdf4' },
-  'In Portal':                     { bg: '#166534', text: '#f0fdf4' },
   'Not Curatable':                 { bg: '#fecaca', text: '#7f1d1d' },
   'Missing Data':                  { bg: '#fecaca', text: '#7f1d1d' },
 };
-
-// Step number logic — mirrors getStepNumber in submission.tsx
-const NORMAL_FLOW = ['Submitted','Initial Review','Approved for Portal','Curation in Progress','Final Review','Preparing for Release','Released'];
-const REJECTED_FLOW = ['Submitted','Initial Review','Not Curatable'];
-const STATUS_MAP: Record<string, string> = {
-  'Awaiting Review': 'Submitted', 'Submission': 'Submitted', 'Received': 'Submitted',
-  'Clarification Needed': 'Curation in Progress', 'Changes Requested': 'Curation in Progress',
-  "Awaiting Submitter's Response": 'Curation in Progress', 'Awaiting Submitters Response': 'Curation in Progress',
-  'In Progress': 'Curation in Progress',
-  'Import in Progress': 'Preparing for Release', 'Under Review': 'Final Review',
-  'Approved for Portal Curation': 'Approved for Portal', 'In Portal': 'Released',
-  'Pending Review': 'Initial Review', 'Missing Data': 'Not Curatable',
-};
-
-function getStepLabel(status: string): string {
-  const isRejected = status === 'Not Curatable' || status === 'Missing Data';
-  if (isRejected) {
-    const idx = REJECTED_FLOW.indexOf('Not Curatable');
-    return idx >= 0 ? `${idx + 1}/${REJECTED_FLOW.length}` : '';
-  }
-  const mapped = STATUS_MAP[status] || status;
-  const idx = NORMAL_FLOW.indexOf(mapped);
-  return idx >= 0 ? `${idx + 1}/${NORMAL_FLOW.length}` : '';
-}
 
 // Vanilla AG Grid cell renderer — works reliably without React hook issues
 class StatusCellWithAssign {
@@ -198,6 +168,7 @@ class StatusCellWithAssign {
   private currentStatus!: string;
   private dropdown: HTMLDivElement | null = null;
   private open = false;
+  private assigning = false;
 
   init(params: any) {
     this.params = params;
@@ -211,17 +182,13 @@ class StatusCellWithAssign {
     const isSuperUser = this.params.context?.isSuperUser;
     const status = this.currentStatus;
     const c = PILL_COLORS[status] || { bg: '#e5e7eb', text: '#374151' };
-    const stepLabel = getStepLabel(status);
-    const stepBadge = stepLabel
-      ? `<span style="font-size:10px;font-weight:700;background:rgba(255,255,255,0.45);border-radius:999px;padding:4px 5px;margin-right:2px;">${stepLabel}</span>`
-      : '';
 
     this.eGui.innerHTML = `
       <div style="padding-left:12px;display:flex;align-items:center;gap:5px;width:100%;">
-        <div style="background:${c.bg};color:${c.text};padding:11px 12px;border-radius:999px;font-size:12px;font-weight:600;line-height:1;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;">
-          ${stepBadge}<span>${status}</span>
+        <div style="background:${c.bg};color:${c.text};padding:13px 12px;border-radius:999px;font-size:12px;font-weight:600;line-height:1;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;">
+          <span>${status}</span>
         </div>
-        ${isSuperUser ? `<button data-btn="chevron" title="Assign status" style="flex-shrink:0;background:none;border:none;cursor:pointer;padding:2px 3px;border-radius:4px;color:#9ca3af;font-size:13px;line-height:1;display:inline-flex;align-items:center;">&#8964;</button>` : ''}
+        ${isSuperUser ? `<button data-btn="chevron" ${this.assigning ? 'disabled' : ''} title="${this.assigning ? 'Updating status' : 'Assign status'}" style="flex-shrink:0;background:none;border:none;cursor:${this.assigning ? 'wait' : 'pointer'};padding:2px 3px;border-radius:4px;color:#9ca3af;font-size:13px;line-height:1;display:inline-flex;align-items:center;opacity:${this.assigning ? '0.5' : '1'};">${this.assigning ? '…' : '&#8964;'}</button>` : ''}
       </div>
     `;
 
@@ -237,6 +204,7 @@ class StatusCellWithAssign {
         }
       });
     }
+
   }
 
   openDropdown() {
@@ -311,14 +279,19 @@ class StatusCellWithAssign {
     if (newStatus === this.currentStatus) return;
     const submissionId = this.params.data?.submissionId;
     if (!submissionId) return;
+    this.assigning = true;
+    this.buildPill();
     try {
       await updateSubmissionStatus(submissionId, BACKEND_MAP[newStatus] || 'pending', newStatus);
       this.currentStatus = newStatus;
       this.params.setValue?.(newStatus);
       this.params.context?.onStatusChanged?.(submissionId, newStatus);
-      this.buildPill();
     } catch (e) {
       console.error('Failed to update status:', e);
+      toast.error(e instanceof Error && e.message ? e.message : 'Failed to update submission status.');
+    } finally {
+      this.assigning = false;
+      this.buildPill();
     }
   }
 
@@ -349,6 +322,118 @@ const statusCol: ColumnDef = {
   // assign-status dropdown. SubmissionGrid sizes this column to its content, so
   // there is nothing to truncate.
   cellClass: 'cell-status',
+};
+
+const curationRenderer = (params: any) => {
+  const submission = params.data || {};
+  const leadCuratorName = String(submission.leadCuratorName || '').trim();
+  const volunteerEligible = isVolunteerSignupOpen(submission);
+  const isSuperUser = params.context?.canAssignCurator;
+  if (!isSuperUser && submission.hasVolunteered === true) {
+    const status = submission.myVolunteerStatus;
+    const display = status === 'accepted'
+      ? { label: 'Assigned to you', classes: 'border-green-200 bg-green-50 text-green-800' }
+      : status === 'completed'
+        ? { label: 'Contribution complete', classes: 'border-blue-200 bg-blue-50 text-blue-800' }
+        : status === 'declined'
+          ? { label: 'Not selected', classes: 'border-red-200 bg-red-50 text-red-800' }
+          : { label: 'You signed up', classes: 'border-sky-200 bg-sky-50 text-sky-800' };
+    return React.createElement('span', {
+      className: `whitespace-nowrap rounded-full border px-2.5 py-1.5 text-xs font-semibold ${display.classes}`,
+    }, display.label);
+  }
+
+  if (!volunteerEligible || leadCuratorName) return null;
+
+  if (isSuperUser) {
+    return React.createElement('span', {
+      className: 'rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1.5 text-xs font-semibold text-orange-800',
+    }, 'Open');
+  }
+
+  return React.createElement('div', {
+    className: 'flex min-w-0 items-center gap-2',
+  }, [
+    React.createElement('button', {
+      key: 'action',
+      type: 'button',
+      className: 'whitespace-nowrap rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1.5 text-xs font-semibold text-orange-800 hover:bg-orange-100',
+      onClick: (event: React.MouseEvent) => {
+        event.stopPropagation();
+        params.context?.onCurationAction?.(submission);
+      },
+    }, "I'm interested"),
+  ]);
+};
+
+const curationCol: ColumnDef = {
+  field: 'leadCuratorName',
+  headerName: 'Join the Effort',
+  width: 160,
+  minWidth: 145,
+  maxWidth: 180,
+  sortable: true,
+  filter: false,
+  resizable: true,
+  suppressSizeToFit: true,
+  suppressNavigable: true,
+  cellRenderer: curationRenderer,
+  cellStyle: {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '8px 12px',
+  },
+  headerComponent: SortableHeader,
+};
+
+const upvoteRenderer = (params: any) => {
+  const submission = params.data || {};
+  if (submission.submissionType !== 'suggest-paper' || submission.publicationType !== 'published') {
+    return null;
+  }
+  const hasUpvoted = submission.hasUpvoted === true;
+  const count = Number(submission.upvoteCount) || 0;
+
+  return React.createElement('button', {
+    type: 'button',
+    title: hasUpvoted ? 'You upvoted this study' : 'Upvote this study for inclusion in cBioPortal',
+    'aria-label': hasUpvoted
+      ? `You upvoted this study. ${count} total upvotes`
+      : `Upvote this study. ${count} total upvotes`,
+    'aria-pressed': hasUpvoted,
+    disabled: hasUpvoted,
+    className: `inline-flex min-w-[58px] items-center justify-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+      hasUpvoted
+        ? 'cursor-default border-blue-700 bg-blue-700 text-white'
+        : 'border-blue-200 bg-blue-50 text-blue-800 hover:border-blue-300 hover:bg-blue-100'
+    }`,
+    onClick: (event: React.MouseEvent) => {
+      event.stopPropagation();
+      params.context?.onStudyUpvote?.(submission);
+    },
+  }, [
+    React.createElement(ThumbsUp, { key: 'icon', className: 'h-3.5 w-3.5' }),
+    React.createElement('span', { key: 'count' }, count),
+  ]);
+};
+
+const upvoteCol: ColumnDef = {
+  field: 'upvoteCount',
+  headerName: 'Upvote',
+  width: 105,
+  minWidth: 100,
+  maxWidth: 120,
+  filter: false,
+  resizable: true,
+  suppressSizeToFit: true,
+  suppressNavigable: true,
+  cellRenderer: upvoteRenderer,
+  cellStyle: {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '8px 12px',
+  },
+  headerComponent: SortableHeader,
 };
 
 const pmidCol: ColumnDef = {
@@ -395,10 +480,10 @@ const emailCol: ColumnDef = {
 const dateCol: ColumnDef = {
   field: 'createdAt',
   headerName: 'Submission Date',
-  width: 200,
-  minWidth: 200,
-  maxWidth: 200,
-  cellRenderer: dateESTRenderer,
+  width: 160,
+  minWidth: 150,
+  maxWidth: 170,
+  cellRenderer: submissionDateRenderer,
   suppressNavigable: true,
   ...baseColumn
 };
@@ -463,7 +548,9 @@ export const usePaperColumnDefs = (isSuperUser: boolean = false): ColumnDef[] =>
     suppressNavigable: true,
     ...baseColumn
   },
-  dateCol
+  dateCol,
+  curationCol,
+  upvoteCol
 ];
 
 // Data Submissions: Submission ID, Status, PMID/URL, [Submitted By, Email — super users only], Study Name, Description, Submission Date
@@ -517,5 +604,7 @@ export const useMySubmissionsColumnDefs = (isSuperUser: boolean = false): Column
     suppressNavigable: true,
     ...baseColumn
   },
-  dateCol
+  dateCol,
+  curationCol,
+  upvoteCol
 ];
