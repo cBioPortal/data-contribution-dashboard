@@ -173,7 +173,7 @@ router.post('/', authenticateToken, async (req, res) => {
     if (!currentWork || currentWork.length > 500) {
       return res.status(400).json({
         status: 'error',
-        message: 'Current work is required and limited to 500 characters'
+        message: 'Background is required and limited to 500 characters'
       });
     }
     if (req.body?.publicNameConsent !== true) {

@@ -1,12 +1,11 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Clock, X, Trash2, AlertTriangle, ExternalLink, Loader2, MoreHorizontal, Pencil, UserPlus, Users } from 'lucide-react';
+import { Check, Clock, X, Trash2, AlertTriangle, ExternalLink, FileCheck2, Loader2, MoreHorizontal, Pencil, UserPlus, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import {
   deleteSubmission,
-  getCurationRecord,
   getCurationTeamMembers,
   getCurationVolunteers,
   getQuestions,
@@ -61,6 +60,14 @@ interface SubmissionFlowTrackerProps {
 
 export type SubmissionPanelTab = 'details' | 'record' | 'questions';
 
+/**
+ * The "Curation & Activity" tab (README, activity log, deliverables review) is
+ * paused for now — not removed, just hidden — while the workflow it supports is
+ * reworked. Flip this back to `true` to bring it back; nothing else needs to
+ * change.
+ */
+const SHOW_CURATION_ACTIVITY_TAB = false;
+
 interface OverviewDraft {
   title: string;
   leadCuratorId: string;
@@ -76,6 +83,8 @@ interface OverviewDraft {
   accessGranted: string;
   isDataTransformed: string;
   portalStudyUrl: string;
+  datahubReadmeUrl: string;
+  rejectionReason: string;
 }
 
 interface CurationVolunteer {
@@ -126,6 +135,8 @@ const emptyOverviewDraft: OverviewDraft = {
   accessGranted: '',
   isDataTransformed: '',
   portalStudyUrl: '',
+  datahubReadmeUrl: '',
+  rejectionReason: '',
 };
 
 const emptyVolunteerDraft: VolunteerDraft = {
@@ -144,6 +155,8 @@ const VOLUNTEER_DESIGNATIONS = [
   'Patient Advocate',
   'Other',
 ];
+
+const VOLUNTEER_BACKGROUND_LIMIT = 500;
 
 export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-papers', data, isSuperUser = false, currentUserEmail = '', currentUserId = '', submissionIndex, activePanelTab, onPanelTabChange, onQuestionCountsChange, onOverviewUpdated, onDeleted, requestedOverviewAction, onRequestedOverviewActionHandled }: SubmissionFlowTrackerProps) => {
   const d = (data as any) || {};
@@ -311,31 +324,19 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
   }, [d.submissionId, isSubmitter, isSuperUser, onQuestionCountsChange]);
 
   // Determine which flow to use
-  const isNotCuratable = currentStatus === 'Not Curatable' || currentStatus === 'Missing Data';
+  const isRejected = currentStatus === 'Rejected' || currentStatus === 'Not Curatable' || currentStatus === 'Missing Data';
   
   let flowSteps: string[];
   if (trackType === 'suggested-papers') {
-    flowSteps = isNotCuratable ? suggestedPapersRejectedFlow : suggestedPapersNormalFlow;
+    flowSteps = isRejected ? suggestedPapersRejectedFlow : suggestedPapersNormalFlow;
   } else {
-    flowSteps = isNotCuratable ? submittedDataRejectedFlow : submittedDataNormalFlow;
+    flowSteps = isRejected ? submittedDataRejectedFlow : submittedDataNormalFlow;
   }
   
-  const mappedStatus = isNotCuratable ? 'Rejected' : getMappedStatus(currentStatus, trackType);
+  const mappedStatus = isRejected ? 'Rejected' : getMappedStatus(currentStatus, trackType);
   const currentStepIndex = flowSteps.indexOf(mappedStatus);
-  const rejectionRecordQuery = useQuery({
-    queryKey: ['curation-record-rejection', d.submissionId],
-    queryFn: () => getCurationRecord(d.submissionId),
-    enabled: isNotCuratable && !!d.submissionId,
-    staleTime: 60 * 1000,
-  });
-  const rejectionReason = isNotCuratable
-    ? [...(rejectionRecordQuery.data?.data?.notes || [])]
-        .reverse()
-        .find((note: { kind?: string; visibility?: string; body?: string }) =>
-          note.kind === 'rejection' &&
-          note.visibility !== 'internal' &&
-          typeof note.body === 'string' &&
-          note.body.trim())?.body?.trim()
+  const rejectionReason = isRejected && typeof d.rejectionReason === 'string' && d.rejectionReason.trim()
+    ? d.rejectionReason.trim()
     : undefined;
   
   const getStepStatus = (stepIndex: number) => {
@@ -467,6 +468,8 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
       accessGranted: booleanDraft(d.accessGranted),
       isDataTransformed: booleanDraft(d.isDataTransformed),
       portalStudyUrl: String(d.portalStudyUrl || ''),
+      datahubReadmeUrl: String(d.datahubReadmeUrl || ''),
+      rejectionReason: String(d.rejectionReason || ''),
     });
     setEditingOverview(true);
     if (!curationTeam) void loadCurationTeam();
@@ -526,6 +529,8 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
     const common = {
       leadCuratorId: overviewDraft.leadCuratorId || null,
       portalStudyUrl: overviewDraft.portalStudyUrl,
+      datahubReadmeUrl: overviewDraft.datahubReadmeUrl,
+      rejectionReason: overviewDraft.rejectionReason,
     };
     const updates = isSuggest
       ? {
@@ -571,6 +576,8 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
         accessGranted: updated.accessGranted,
         isDataTransformed: updated.isDataTransformed,
         portalStudyUrl: updated.portalStudyUrl,
+        datahubReadmeUrl: updated.datahubReadmeUrl,
+        rejectionReason: updated.rejectionReason,
         leadCuratorId: updated.leadCuratorId,
         leadCuratorName: updated.leadCuratorName,
       });
@@ -627,7 +634,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
             </h3>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {d.submissionId && (
+            {SHOW_CURATION_ACTIVITY_TAB && d.submissionId && (
               <Link
                 to={`/study/${d.submissionId}`}
                 className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-blue-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800"
@@ -720,7 +727,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
               }}
             >
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <label className="space-y-1.5 text-xs font-semibold text-gray-700 sm:col-span-2">
+                <label className="space-y-1.5 text-xs font-medium text-gray-600 sm:col-span-2">
                   <span>{isSuggest ? 'Paper title' : 'Study name'}</span>
                   <Input
                     value={overviewDraft.title}
@@ -728,7 +735,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                     maxLength={500}
                   />
                 </label>
-                <label className="space-y-1.5 text-xs font-semibold text-gray-700 sm:col-span-2">
+                <label className="space-y-1.5 text-xs font-medium text-gray-600 sm:col-span-2">
                   <span>cBioPortal study link</span>
                   <Input
                     type="url"
@@ -738,7 +745,28 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                     maxLength={2000}
                   />
                 </label>
-                <label className="space-y-1.5 text-xs font-semibold text-gray-700 sm:col-span-2">
+                <label className="space-y-1.5 text-xs font-medium text-gray-600 sm:col-span-2">
+                  <span>Curation &amp; transformation notes link</span>
+                  <Input
+                    type="url"
+                    placeholder="https://github.com/cBioPortal/datahub/blob/master/.../README.md"
+                    value={overviewDraft.datahubReadmeUrl}
+                    onChange={event => setOverviewDraft(current => ({ ...current, datahubReadmeUrl: event.target.value }))}
+                    maxLength={2000}
+                  />
+                </label>
+                <label className="space-y-1.5 text-xs font-medium text-gray-600 sm:col-span-2">
+                  <span>Rejection reason</span>
+                  <textarea
+                    placeholder="If the submission is rejected, explain why. Shown to the submitter on the tracker."
+                    value={overviewDraft.rejectionReason}
+                    onChange={event => setOverviewDraft(current => ({ ...current, rejectionReason: event.target.value }))}
+                    maxLength={2000}
+                    rows={3}
+                    className="flex min-h-[80px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </label>
+                <label className="space-y-1.5 text-xs font-medium text-gray-600 sm:col-span-2">
                   <span>Lead Curator</span>
                   <select
                     value={overviewDraft.leadCuratorId}
@@ -769,7 +797,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                   )}
                 </label>
 
-                <label className="space-y-1.5 text-xs font-semibold text-gray-700">
+                <label className="space-y-1.5 text-xs font-medium text-gray-600">
                   <span>PMID / URL</span>
                   <Input
                     value={overviewDraft.reference}
@@ -780,7 +808,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
 
                 {isSuggest ? (
                   <>
-                    <label className="space-y-1.5 text-xs font-semibold text-gray-700">
+                    <label className="space-y-1.5 text-xs font-medium text-gray-600">
                       <span>Journal / source</span>
                       <Input
                         value={overviewDraft.journal}
@@ -788,7 +816,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                         maxLength={500}
                       />
                     </label>
-                    <label className="space-y-1.5 text-xs font-semibold text-gray-700 sm:col-span-2">
+                    <label className="space-y-1.5 text-xs font-medium text-gray-600 sm:col-span-2">
                       <span>Authors</span>
                       <Input
                         value={overviewDraft.authors}
@@ -796,7 +824,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                         maxLength={2000}
                       />
                     </label>
-                    <label className="space-y-1.5 text-xs font-semibold text-gray-700">
+                    <label className="space-y-1.5 text-xs font-medium text-gray-600">
                       <span>Publication year</span>
                       <Input
                         inputMode="numeric"
@@ -805,7 +833,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                         maxLength={4}
                       />
                     </label>
-                    <label className="space-y-1.5 text-xs font-semibold text-gray-700">
+                    <label className="space-y-1.5 text-xs font-medium text-gray-600">
                       <span>Lead author</span>
                       <select
                         value={overviewDraft.isLeadAuthor}
@@ -820,7 +848,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                   </>
                 ) : (
                   <>
-                    <label className="space-y-1.5 text-xs font-semibold text-gray-700">
+                    <label className="space-y-1.5 text-xs font-medium text-gray-600">
                       <span>Link to data</span>
                       <Input
                         value={overviewDraft.linkToData}
@@ -828,7 +856,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                         maxLength={2000}
                       />
                     </label>
-                    <label className="space-y-1.5 text-xs font-semibold text-gray-700">
+                    <label className="space-y-1.5 text-xs font-medium text-gray-600">
                       <span>Reference genome</span>
                       <Input
                         value={overviewDraft.referenceGenome}
@@ -836,7 +864,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                         maxLength={200}
                       />
                     </label>
-                    <label className="space-y-1.5 text-xs font-semibold text-gray-700">
+                    <label className="space-y-1.5 text-xs font-medium text-gray-600">
                       <span>Data types</span>
                       <Input
                         placeholder="Mutation, CNA, clinical"
@@ -844,7 +872,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                         onChange={event => setOverviewDraft(current => ({ ...current, dataTypes: event.target.value }))}
                       />
                     </label>
-                    <label className="space-y-1.5 text-xs font-semibold text-gray-700">
+                    <label className="space-y-1.5 text-xs font-medium text-gray-600">
                       <span>Curation access</span>
                       <select
                         value={overviewDraft.accessGranted}
@@ -856,7 +884,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                         <option value="false">Not granted</option>
                       </select>
                     </label>
-                    <label className="space-y-1.5 text-xs font-semibold text-gray-700">
+                    <label className="space-y-1.5 text-xs font-medium text-gray-600">
                       <span>Data transformed</span>
                       <select
                         value={overviewDraft.isDataTransformed}
@@ -868,7 +896,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                         <option value="false">No</option>
                       </select>
                     </label>
-                    <label className="space-y-1.5 text-xs font-semibold text-gray-700 sm:col-span-2">
+                    <label className="space-y-1.5 text-xs font-medium text-gray-600 sm:col-span-2">
                       <span>Description</span>
                       <Textarea
                         value={overviewDraft.description}
@@ -920,18 +948,18 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
             <DialogHeader>
               <DialogTitle>Interested in helping curate this study?</DialogTitle>
               <DialogDescription>
-                Join the cBioPortal community and help make valuable cancer research data more accessible.
+                Help make cancer research data in cBioPortal more accessible.
               </DialogDescription>
             </DialogHeader>
 
-            <div className="flex gap-3 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-orange-700 shadow-sm">
+            <div className="group flex items-center gap-3 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 transition-colors hover:border-orange-300 hover:bg-orange-100/70">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-orange-700 shadow-sm transition-transform duration-200 group-hover:scale-110 group-hover:-rotate-6">
                 <UserPlus className="h-4 w-4" />
               </div>
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-gray-900">We would love your help</p>
+              <div className="space-y-0.5">
+                <p className="text-sm font-semibold text-gray-900">We'd love your help! 👋</p>
                 <p className="text-xs leading-relaxed text-gray-600">
-                  Tell us a little about yourself and your interest in curation. The curation team will review your response before making any assignment.
+                  Tell us about yourself, and we'll get back to you.
                 </p>
               </div>
             </div>
@@ -943,55 +971,56 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                 registerVolunteerMutation.mutate();
               }}
             >
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900">Tell us about yourself</h3>
-                <p className="mt-1 text-xs text-gray-500">
-                  Your application is private. If accepted, your name will be shown publicly as the Community Curator; your contact and background details remain visible only to the curation team.
-                </p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <label className="block space-y-1.5 text-xs font-semibold text-gray-700">
+                  <span>Name</span>
+                  <Input
+                    required
+                    className="font-normal"
+                    value={volunteerDraft.name}
+                    onChange={event => setVolunteerDraft(current => ({ ...current, name: event.target.value }))}
+                    maxLength={200}
+                  />
+                </label>
+                <label className="block space-y-1.5 text-xs font-semibold text-gray-700">
+                  <span>Email</span>
+                  <Input
+                    required
+                    type="email"
+                    className="font-normal"
+                    value={volunteerDraft.email}
+                    onChange={event => setVolunteerDraft(current => ({ ...current, email: event.target.value }))}
+                    maxLength={320}
+                  />
+                </label>
               </div>
-
               <label className="block space-y-1.5 text-xs font-semibold text-gray-700">
-                <span>Name</span>
-                <Input
-                  required
-                  value={volunteerDraft.name}
-                  onChange={event => setVolunteerDraft(current => ({ ...current, name: event.target.value }))}
-                  maxLength={200}
-                />
-              </label>
-              <label className="block space-y-1.5 text-xs font-semibold text-gray-700">
-                <span>Email</span>
-                <Input
-                  required
-                  type="email"
-                  value={volunteerDraft.email}
-                  onChange={event => setVolunteerDraft(current => ({ ...current, email: event.target.value }))}
-                  maxLength={320}
-                />
-              </label>
-              <label className="block space-y-1.5 text-xs font-semibold text-gray-700">
-                <span>Designation</span>
+                <span>Which best describes you?</span>
                 <select
                   required
                   value={volunteerDraft.designation}
                   onChange={event => setVolunteerDraft(current => ({ ...current, designation: event.target.value }))}
-                  className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="">Select a designation</option>
+                  <option value="">Select one</option>
                   {VOLUNTEER_DESIGNATIONS.map(designation => (
                     <option key={designation} value={designation}>{designation}</option>
                   ))}
                 </select>
               </label>
               <label className="block space-y-1.5 text-xs font-semibold text-gray-700">
-                <span>What do you currently do?</span>
+                <span>What's your background?</span>
                 <Textarea
                   required
-                  placeholder="For example: PhD student studying pediatric cancer genomics"
+                  className="font-normal"
+                  placeholder="e.g. PhD student in cancer genomics, working with RNA-seq data"
                   value={volunteerDraft.currentWork}
                   onChange={event => setVolunteerDraft(current => ({ ...current, currentWork: event.target.value }))}
-                  maxLength={500}
+                  maxLength={VOLUNTEER_BACKGROUND_LIMIT}
                 />
+                <span className={`block text-right text-[11px] font-normal ${volunteerDraft.currentWork.length >= VOLUNTEER_BACKGROUND_LIMIT - 50 ? 'text-orange-600' : 'text-gray-400'}`}>
+                  {volunteerDraft.currentWork.length}/{VOLUNTEER_BACKGROUND_LIMIT}
+                </span>
               </label>
               <label className="flex items-start gap-2 text-xs text-gray-600">
                 <input
@@ -1001,7 +1030,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                   onChange={event => setVolunteerDraft(current => ({ ...current, publicNameConsent: event.target.checked }))}
                   className="mt-0.5 h-4 w-4 rounded border-gray-300"
                 />
-                <span>I understand this is an application, not an immediate assignment, and that my name will be public if I am accepted.</span>
+                <span>I understand this is an application. If accepted, my name will be shown publicly as the Community Curator; my other details stay private.</span>
               </label>
 
               {volunteerError && <p role="alert" className="text-xs text-red-600">{volunteerError}</p>}
@@ -1047,12 +1076,14 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
             >
               Overview
             </TabsTrigger>
-            <TabsTrigger
-              value="record"
-              className="shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-2 py-2 text-xs font-semibold text-gray-500 shadow-none hover:text-gray-700 data-[state=active]:border-blue-600 data-[state=active]:bg-transparent data-[state=active]:text-gray-900 data-[state=active]:shadow-none sm:px-3 sm:text-[13px]"
-            >
-              Curation &amp; Activity
-            </TabsTrigger>
+            {SHOW_CURATION_ACTIVITY_TAB && (
+              <TabsTrigger
+                value="record"
+                className="shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-2 py-2 text-xs font-semibold text-gray-500 shadow-none hover:text-gray-700 data-[state=active]:border-blue-600 data-[state=active]:bg-transparent data-[state=active]:text-gray-900 data-[state=active]:shadow-none sm:px-3 sm:text-[13px]"
+              >
+                Curation &amp; Activity
+              </TabsTrigger>
+            )}
             <TabsTrigger
               value="questions"
               onPointerEnter={prefetchQuestions}
@@ -1161,19 +1192,38 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                 </div>
 
                 {volunteerStudy && <div className="border-t border-gray-200 pt-2.5">
-                  <div className="mb-2 flex items-center gap-2">
-                    <Users className="h-4 w-4 text-gray-500" />
-                    <span className="text-xs font-semibold text-gray-700">
-                      {volunteerData?.isCurator
-                        ? 'Expressions of interest'
-                        : volunteerData?.volunteers.some(volunteer => volunteer.status === 'completed')
-                          ? 'Community Contributor'
-                          : volunteerData?.volunteers.some(volunteer => volunteer.status === 'accepted')
-                            ? 'Community Curator'
-                          : 'Interested in helping?'}
-                      {volunteerData?.isCurator ? ` (${volunteerData.volunteerCount})` : ''}
-                    </span>
-                  </div>
+                  {(() => {
+                    const hasCompleted = volunteerData?.volunteers.some(volunteer => volunteer.status === 'completed');
+                    const hasAccepted = volunteerData?.volunteers.some(volunteer => volunteer.status === 'accepted');
+                    // The "Interested in helping?" prompt is only meaningful when a
+                    // button or sign-in message actually renders below it — otherwise
+                    // it's a heading with nothing under it.
+                    const hasOpenPrompt = !!volunteerData && (
+                      myVolunteer?.status === 'pending' ||
+                      myVolunteer?.status === 'accepted' ||
+                      myVolunteer?.status === 'completed' ||
+                      myVolunteer?.status === 'declined' ||
+                      (volunteerData.signupOpen && volunteerData.canVolunteer) ||
+                      (volunteerData.signupOpen && !volunteerData.isAuthenticated)
+                    );
+                    const showHeader = volunteerData?.isCurator || hasCompleted || hasAccepted || hasOpenPrompt;
+                    if (!showHeader) return null;
+                    return (
+                      <div className="mb-2 flex items-center gap-2">
+                        <Users className="h-4 w-4 text-gray-500" />
+                        <span className="text-xs font-semibold text-gray-700">
+                          {volunteerData?.isCurator
+                            ? 'Expressions of interest'
+                            : hasCompleted
+                              ? 'Community Contributor'
+                              : hasAccepted
+                                ? 'Community Curator'
+                                : 'Interested in helping?'}
+                          {volunteerData?.isCurator ? ` (${volunteerData.volunteerCount})` : ''}
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   {volunteersQuery.isPending && (
                     <p className="flex items-center gap-2 text-xs text-gray-400">
@@ -1313,7 +1363,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                                 ? 'Your completed curation is credited on this study.'
                                 : myVolunteer.status === 'accepted'
                                   ? myVolunteer.reviewRequestedAt
-                                    ? 'Your curation is awaiting review by the curation team.'
+                                    ? 'Your curated data is awaiting review by the curation team.'
                                     : 'You are assigned as the Community Curator.'
                                   : 'Your interest is pending review.'}
                             </p>
@@ -1322,17 +1372,26 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                                 Changes requested: {myVolunteer.reviewFeedback}
                               </p>
                             )}
-                            {myVolunteer.status === 'accepted' && !myVolunteer.reviewRequestedAt && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setLocalPanelTab('record');
-                                  onPanelTabChange?.('record');
-                                }}
-                                className="mt-2 rounded-md bg-[#2C5EBE] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#1A3B6D]"
-                              >
-                                Open Curation Record
-                              </button>
+                            {myVolunteer.status === 'accepted' && (
+                              myVolunteer.reviewRequestedAt ? (
+                                <Link
+                                  to={`/study/${d.submissionId}`}
+                                  className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[#2C5EBE] hover:text-[#1A3B6D]"
+                                >
+                                  <FileCheck2 className="h-3.5 w-3.5" /> View submitted data
+                                </Link>
+                              ) : (
+                                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                  <Link
+                                    to={`/study/${d.submissionId}`}
+                                    className="inline-flex items-center gap-1.5 rounded-md bg-[#2C5EBE] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1A3B6D]"
+                                  >
+                                    <FileCheck2 className="h-3.5 w-3.5" />
+                                    {myVolunteer.reviewFeedback ? 'Resubmit curated data' : 'Submit curated data'}
+                                  </Link>
+                                  <span className="text-xs text-green-800">Finished curating? Hand your files to the curation team.</span>
+                                </div>
+                              )
                             )}
                             {myVolunteer.status !== 'completed' &&
                               !myVolunteer.reviewRequestedAt &&
@@ -1424,7 +1483,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 font-semibold text-blue-600 underline hover:text-blue-800"
                           >
-                            View study in cBioPortal <ExternalLink className="h-3 w-3" />
+                            View the study <ExternalLink className="h-3 w-3" />
                           </a>
                         </>
                       )}
@@ -1437,7 +1496,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                 <div className="absolute left-5 right-5 top-[19px] hidden h-0.5 rounded-full bg-gray-200 sm:block">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${
-                      isNotCuratable ? 'bg-red-500' : mappedStatus === 'Released' ? 'bg-green-500' : 'bg-blue-500'
+                      isRejected ? 'bg-red-500' : mappedStatus === 'Released' ? 'bg-green-500' : 'bg-blue-500'
                     }`}
                     style={{
                       width: currentStepIndex >= 0 ? `${(currentStepIndex / (flowSteps.length - 1)) * 100}%` : '0%',
@@ -1447,7 +1506,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                 <div className="absolute bottom-5 left-[19px] top-5 w-0.5 rounded-full bg-gray-200 sm:hidden">
                   <div
                     className={`w-full rounded-full transition-all duration-500 ${
-                      isNotCuratable ? 'bg-red-500' : mappedStatus === 'Released' ? 'bg-green-500' : 'bg-blue-500'
+                      isRejected ? 'bg-red-500' : mappedStatus === 'Released' ? 'bg-green-500' : 'bg-blue-500'
                     }`}
                     style={{
                       height: currentStepIndex >= 0 ? `${(currentStepIndex / (flowSteps.length - 1)) * 100}%` : '0%',
@@ -1459,6 +1518,7 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                   {flowSteps.map((step, index) => {
                     const status = getStepStatus(index);
                     const tooltipProps = getTooltipProps(index, flowSteps.length);
+                    const stageDate = formatSubmissionDate(d.stageTimestamps?.[step]);
 
                     return (
                       <div key={step} className="flex flex-row items-start sm:flex-col sm:items-center">
@@ -1497,21 +1557,42 @@ export const SubmissionFlowTracker = ({ currentStatus, trackType = 'suggested-pa
                           }`}>
                             {formatStepLabel(step)}
                           </div>
+                          {stageDate && (status === 'completed' || status === 'current') && (
+                            <div className="text-left text-[10px] text-gray-400 sm:text-center">
+                              {stageDate}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
                   })}
                 </div>
               </div>
+
+              {d.datahubReadmeUrl && (
+                <p className="mt-4 text-xs text-gray-500">
+                  For details on how this study's data was curated and transformed, see the{' '}
+                  <a
+                    href={d.datahubReadmeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-semibold text-blue-600 underline hover:text-blue-800"
+                  >
+                    Curation &amp; Transformation Notes <ExternalLink className="h-3 w-3" />
+                  </a>.
+                </p>
+              )}
             </section>
           </div>
         </TabsContent>
 
-        <TabsContent value="record" className="mt-0">
-          {d.submissionId && (
-            <CurationRecord submissionId={d.submissionId} showPermalink={false} />
-          )}
-        </TabsContent>
+        {SHOW_CURATION_ACTIVITY_TAB && (
+          <TabsContent value="record" className="mt-0">
+            {d.submissionId && (
+              <CurationRecord submissionId={d.submissionId} showPermalink={false} />
+            )}
+          </TabsContent>
+        )}
 
         {/* Mounted as soon as the panel opens, and hidden rather than unmounted
             when another tab is showing. The point is the count: a question is

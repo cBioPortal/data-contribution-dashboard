@@ -103,37 +103,30 @@ const idCol: ColumnDef = {
   ...baseColumn
 };
 
-// All assignable labels grouped by step — used in the super-user dropdown
+// The labels a super user can assign: one per stage, plus the single rejection
+// label. Mirrors ASSIGNABLE_STAGES in backend/src/utils/pipelineStages.js,
+// which rejects anything else.
 export const ASSIGNABLE_STATUSES = [
-  { group: 'Step 1 — Submitted',             value: 'Submitted' },
-  { group: 'Step 2 — Initial Review',         value: 'Initial Review' },
-  { group: 'Step 3 — Approved for Curation',  value: 'Approved for Curation' },
-  { group: 'Step 4 — Curation in Progress',   value: 'Curation in Progress' },
-  { group: 'Step 4 — Curation in Progress',   value: 'Clarification Needed' },
-  { group: 'Step 4 — Curation in Progress',   value: 'Changes Requested' },
-  { group: "Step 4 — Curation in Progress",   value: "Awaiting Submitter's Response" },
-  { group: 'Step 5 — Final Review',           value: 'Final Review' },
-  { group: 'Step 6 — Preparing for Release',  value: 'Preparing for Release' },
-  { group: 'Step 7 — Released',               value: 'Released' },
-  { group: 'Rejected',                        value: 'Not Curatable' },
-  { group: 'Rejected',                        value: 'Missing Data' },
+  { step: '1', value: 'Submitted' },
+  { step: '2', value: 'Initial Review' },
+  { step: '3', value: 'Approved for Curation' },
+  { step: '4', value: 'Curation in Progress' },
+  { step: '5', value: 'Final Review' },
+  { step: '6', value: 'Preparing for Release' },
+  { step: '7', value: 'Released' },
+  { step: null, value: 'Rejected' },
 ];
 
 // Backend status map
 const BACKEND_MAP: Record<string, string> = {
   'Submitted': 'pending',
-  'Submission': 'pending',
   'Initial Review': 'received',
   'Approved for Curation': 'received',
   'Curation in Progress': 'in-progress',
-  'Clarification Needed': 'in-progress',
-  'Changes Requested': 'in-progress',
-  "Awaiting Submitter's Response": 'in-progress',
   'Final Review': 'in-review',
   'Preparing for Release': 'in-review',
   'Released': 'approved',
-  'Not Curatable': 'not-curatable',
-  'Missing Data': 'missing-data',
+  'Rejected': 'not-curatable',
 };
 
 // Pill colors — matches statusColors in submission.tsx
@@ -157,6 +150,7 @@ const PILL_COLORS: Record<string, { bg: string; text: string }> = {
   'Under Review':                  { bg: '#fed7aa', text: '#7c2d12' },
   'Preparing for Release':         { bg: '#99f6e4', text: '#134e4a' },
   'Released':                      { bg: '#166534', text: '#f0fdf4' },
+  'Rejected':                      { bg: '#fecaca', text: '#7f1d1d' },
   'Not Curatable':                 { bg: '#fecaca', text: '#7f1d1d' },
   'Missing Data':                  { bg: '#fecaca', text: '#7f1d1d' },
 };
@@ -211,12 +205,6 @@ class StatusCellWithAssign {
     if (this.open) return;
     this.open = true;
 
-    const grouped = ASSIGNABLE_STATUSES.reduce((acc: Record<string, string[]>, s) => {
-      if (!acc[s.group]) acc[s.group] = [];
-      acc[s.group].push(s.value);
-      return acc;
-    }, {});
-
     const rect = this.eGui.getBoundingClientRect();
     const dd = document.createElement('div');
     dd.style.cssText = [
@@ -235,23 +223,27 @@ class StatusCellWithAssign {
     document.body.appendChild(dd);
     this.dropdown = dd;
 
-    Object.entries(grouped).forEach(([group, statuses]) => {
-      const header = document.createElement('div');
-      header.style.cssText = 'padding:8px 12px 3px;font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;';
-      header.textContent = group;
-      dd.appendChild(header);
-
-      statuses.forEach(s => {
-        const item = document.createElement('button');
-        const isCurrent = s === this.currentStatus;
-        item.style.cssText = `width:100%;text-align:left;padding:5px 16px;font-size:13px;background:none;border:none;cursor:pointer;display:block;color:${isCurrent ? '#2563eb' : '#374151'};font-weight:${isCurrent ? '600' : '400'};`;
-        item.textContent = s;
-        item.addEventListener('mouseenter', () => { item.style.background = '#eff6ff'; item.style.color = '#1d4ed8'; });
-        item.addEventListener('mouseleave', () => { item.style.background = 'none'; item.style.color = isCurrent ? '#2563eb' : '#374151'; });
-        item.addEventListener('click', (e: Event) => { e.stopPropagation(); this.assign(s); });
-        dd.appendChild(item);
-      });
+    ASSIGNABLE_STATUSES.forEach(({ step, value }) => {
+      if (!step) {
+        const divider = document.createElement('div');
+        divider.style.cssText = 'margin:4px 0;border-top:1px solid #f3f4f6;';
+        dd.appendChild(divider);
+      }
+      const item = document.createElement('button');
+      const isCurrent = value === this.currentStatus;
+      item.style.cssText = `width:100%;text-align:left;padding:6px 12px;font-size:13px;background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:8px;color:${isCurrent ? '#2563eb' : '#374151'};font-weight:${isCurrent ? '600' : '400'};`;
+      const stepEl = document.createElement('span');
+      stepEl.style.cssText = 'width:14px;flex-shrink:0;font-size:11px;font-weight:600;color:#9ca3af;text-align:right;';
+      stepEl.textContent = step || '';
+      const labelEl = document.createElement('span');
+      labelEl.textContent = value;
+      item.append(stepEl, labelEl);
+      item.addEventListener('mouseenter', () => { item.style.background = '#eff6ff'; item.style.color = '#1d4ed8'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'none'; item.style.color = isCurrent ? '#2563eb' : '#374151'; });
+      item.addEventListener('click', (e: Event) => { e.stopPropagation(); this.assign(value); });
+      dd.appendChild(item);
     });
+    dd.style.padding = '4px 0';
 
     // Close on outside click — use capture so it fires before anything else
     setTimeout(() => {
@@ -282,10 +274,11 @@ class StatusCellWithAssign {
     this.assigning = true;
     this.buildPill();
     try {
-      await updateSubmissionStatus(submissionId, BACKEND_MAP[newStatus] || 'pending', newStatus);
+      const response = await updateSubmissionStatus(submissionId, BACKEND_MAP[newStatus] || 'pending', newStatus);
       this.currentStatus = newStatus;
       this.params.setValue?.(newStatus);
-      this.params.context?.onStatusChanged?.(submissionId, newStatus);
+      const stageTimestamps = response?.data?.submission?.stageTimestamps;
+      this.params.context?.onStatusChanged?.(submissionId, newStatus, stageTimestamps);
     } catch (e) {
       console.error('Failed to update status:', e);
       toast.error(e instanceof Error && e.message ? e.message : 'Failed to update submission status.');

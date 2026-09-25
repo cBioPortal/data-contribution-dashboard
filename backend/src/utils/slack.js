@@ -114,7 +114,7 @@ export function notifyCurationVolunteer({
     `*Submission:* ${title || submissionId}`,
     `*Interested user:* ${name} (${email})`,
     `*Designation:* ${designation}`,
-    `*Currently:* ${currentWork}`,
+    `*Background:* ${currentWork}`,
   ];
   return sendSlackNotification(lines.join('\n'));
 }

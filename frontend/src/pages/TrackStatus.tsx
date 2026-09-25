@@ -39,20 +39,24 @@ const byLatestQuestionActivity = (a: Submission, b: Submission) =>
   new Date(b.latestQuestionActivityAt || 0).getTime() -
   new Date(a.latestQuestionActivityAt || 0).getTime();
 
-/** Map a backend status code to the label the grid displays. */
+/**
+ * Map a backend status code to the label the grid displays, for a submission
+ * with no displayStatus. Only ever a main stage label. Mirrors STATUS_LABELS in
+ * backend/src/utils/pipelineStages.js.
+ */
 const mapBackendStatus = (status: string): string => {
   const statusMap: Record<string, string> = {
     'pending': 'Submitted',
-    'received': 'Awaiting Review',
+    'received': 'Initial Review',
     'in-progress': 'Curation in Progress',
-    'in-review': 'In Review',
-    'missing-data': 'Missing Data',
-    'not-curatable': 'Not Curatable',
+    'in-review': 'Final Review',
+    'missing-data': 'Rejected',
+    'not-curatable': 'Rejected',
     'in-portal': 'Released',
     'approved': 'Released',
-    'rejected': 'Not Curatable'
+    'rejected': 'Rejected'
   };
-  return statusMap[status] || 'Submission';
+  return statusMap[status] || 'Submitted';
 };
 
 /**
@@ -108,7 +112,10 @@ const toSubmission = (sub: any) => ({
   questionCount: sub.questionCount ?? 0,
   needsResponseCount: sub.needsResponseCount ?? 0,
   latestQuestionActivityAt: sub.latestQuestionActivityAt ?? null,
+  stageTimestamps: sub.stageTimestamps ?? undefined,
   portalStudyUrl: sub.portalStudyUrl ?? null,
+  datahubReadmeUrl: sub.datahubReadmeUrl ?? null,
+  rejectionReason: sub.rejectionReason ?? null,
   leadCuratorId: sub.leadCuratorId ?? null,
   leadCuratorName: sub.leadCuratorName ?? null,
   volunteerCount: sub.volunteerCount ?? 0,
@@ -630,10 +637,10 @@ const TrackStatus = () => {
   }, [publishedData, preprintData, activeTab, searchQuery, needsResponseOnly, openForVolunteersOnly]);
 
   // Update submissions state when a status is assigned — keeps labels persistent across tab switches
-  const handleStatusChanged = (submissionId: string, newStatus: string) => {
+  const handleStatusChanged = (submissionId: string, newStatus: string, stageTimestamps?: Record<string, string>) => {
     setSubmissions(prev => prev.map(s =>
       (s.submissionId === submissionId || s.id === submissionId)
-        ? { ...s, status: newStatus }
+        ? { ...s, status: newStatus, ...(stageTimestamps ? { stageTimestamps } : {}) }
         : s
     ));
   };

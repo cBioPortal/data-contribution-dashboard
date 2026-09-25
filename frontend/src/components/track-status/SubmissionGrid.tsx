@@ -80,7 +80,7 @@ interface SubmissionGridProps {
     latestActivityAt: string | null,
   ) => void;
   onOverviewUpdated?: (submissionId: string, updates: Partial<Submission>) => void;
-  onStatusChanged?: (submissionId: string, newStatus: string) => void;
+  onStatusChanged?: (submissionId: string, newStatus: string, stageTimestamps?: Record<string, string>) => void;
   onDeleted?: (submissionId: string) => void;
   trackType?: 'suggested-papers' | 'submitted-data';
   isSuperUser?: boolean;
@@ -304,8 +304,8 @@ export const SubmissionGrid = ({ rowData, columnDefs, selectedSubmissionId = nul
     return () => cancelAnimationFrame(frame);
   }, [selectedRow]);
 
-  const handleStatusChangedWithPanel = (submissionId: string, newStatus: string) => {
-    onStatusChanged?.(submissionId, newStatus);
+  const handleStatusChangedWithPanel = (submissionId: string, newStatus: string, stageTimestamps?: Record<string, string>) => {
+    onStatusChanged?.(submissionId, newStatus, stageTimestamps);
   };
 
   const handleCellClicked = (event: CellClickedEvent) => {

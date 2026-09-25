@@ -481,8 +481,8 @@ function normalizeStatus(raw) {
   if (s === 'Import in Progress') return 'Preparing for Release';
   if (s === 'Under Review' || s === 'in-review') return 'Final Review';
   if (s === 'In Portal' || s === 'approved') return 'Released';
-  if (s === 'Missing Data' || s === 'needs-revision') return 'Not Curatable';
-  if (s === 'rejected' || s === 'on-hold') return 'Not Curatable';
+  if (['Rejected', 'Not Curatable', 'not-curatable', 'Missing Data', 'missing-data',
+       'needs-revision', 'rejected', 'on-hold'].includes(s)) return 'Rejected';
   return PIPELINE_STAGES.includes(s) ? s : 'Submitted';
 }
 
@@ -495,21 +495,21 @@ router.get('/submissions/pipeline-funnel', async (req, res) => {
     const submissions = await loadAllSubmissions();
     const counts = {};
     PIPELINE_STAGES.forEach(s => { counts[s] = 0; });
-    counts['Not Curatable'] = 0;
+    counts['Rejected'] = 0;
 
     submissions.forEach(sub => {
       const stage = normalizeStatus(sub.displayStatus || sub.status);
       counts[stage] = (counts[stage] || 0) + 1;
     });
 
-    // Return as ordered funnel stages + not curatable at end
+    // Return as ordered funnel stages + rejected at end
     const data = [
       ...PIPELINE_STAGES.map((stage, i) => ({
         stage,
         step: i + 1,
         count: counts[stage],
       })),
-      { stage: 'Not Curatable', step: null, count: counts['Not Curatable'] },
+      { stage: 'Rejected', step: null, count: counts['Rejected'] },
     ].filter(d => d.count > 0);
 
     res.json({ status: 'success', data });

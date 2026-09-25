@@ -14,20 +14,28 @@
  * code across two packages that have no build relationship today.
  */
 
-/** Stored status code -> the label shown in the tracker. */
+/**
+ * Stored status code -> the label shown in the tracker, for a submission with
+ * no displayStatus. Only ever a main stage label (see ASSIGNABLE_STAGES).
+ * Mirrors mapBackendStatus in pages/TrackStatus.tsx.
+ */
 const STATUS_LABELS = {
   'pending': 'Submitted',
-  'received': 'Awaiting Review',
+  'received': 'Initial Review',
   'in-progress': 'Curation in Progress',
-  'in-review': 'In Review',
-  'missing-data': 'Missing Data',
-  'not-curatable': 'Not Curatable',
+  'in-review': 'Final Review',
+  'missing-data': 'Rejected',
+  'not-curatable': 'Rejected',
   'in-portal': 'Released',
   'approved': 'Released',
-  'rejected': 'Not Curatable',
+  'rejected': 'Rejected',
 };
 
-/** Display label -> the stage the flow diagram draws it at. */
+/**
+ * Retired sub-labels -> the stage they belong to. Submissions no longer carry
+ * these (schema.sql rewrites them to the main label), but the mapping stays so
+ * a stray legacy value still lands on the right stage rather than none.
+ */
 const STAGE_ALIASES = {
   'Awaiting Review': 'Submitted',
   'Submission': 'Submitted',
@@ -39,7 +47,8 @@ const STAGE_ALIASES = {
   'Import in Progress': 'Preparing for Release',
   'Under Review': 'Final Review',
   'In Portal': 'Released',
-  'Missing Data': 'Not Curatable',
+  'Missing Data': 'Rejected',
+  'Not Curatable': 'Rejected',
   'Approved for Portal Curation': 'Approved for Curation',
   'Approved for Portal': 'Approved for Curation',
 };
@@ -49,6 +58,36 @@ const OPEN_VOLUNTEER_STAGES = new Set([
   'Initial Review',
   'Approved for Curation',
 ]);
+
+/**
+ * The stages a submission normally passes through, in order. Mirrors
+ * suggestedPapersNormalFlow / submittedDataNormalFlow in
+ * components/track-status/flowDefinitions.ts — both tracks use the same
+ * stage names, so one ordering serves either.
+ */
+export const NORMAL_FLOW_STAGES = [
+  'Submitted',
+  'Initial Review',
+  'Approved for Curation',
+  'Curation in Progress',
+  'Final Review',
+  'Preparing for Release',
+  'Released',
+];
+
+/**
+ * The only labels a curator can assign: one per stage, plus the single
+ * rejection label. Mirrors ASSIGNABLE_STATUSES in
+ * components/track-status/GridConfig.tsx.
+ */
+export const ASSIGNABLE_STAGES = [...NORMAL_FLOW_STAGES, 'Rejected'];
+
+/** The short-circuit flow a rejected submission takes instead. */
+export const REJECTED_FLOW_STAGES = [
+  'Submitted',
+  'Initial Review',
+  'Rejected',
+];
 
 /**
  * The pipeline stage a submission is currently at.
@@ -73,4 +112,37 @@ export function isVolunteerStageOpen(submission) {
   return OPEN_VOLUNTEER_STAGES.has(getMappedStage(submission));
 }
 
-export default { getMappedStage, isVolunteerStageOpen };
+/**
+ * Merge in a timestamp for every stage a submission has now reached, without
+ * disturbing stages it already had a timestamp for.
+ *
+ * A curator can jump straight from "Submitted" to "Curation in Progress",
+ * skipping "Initial Review" and "Approved for Curation" — those never got
+ * their own status update, so there is no real moment to date them. Rather
+ * than leave them blank (which would break the "each stage has a date" UI) or
+ * invent distinct fake moments (which would claim a precision that doesn't
+ * exist), every stage the jump passed through — skipped or landed-on — is
+ * stamped with the same timestamp: the moment the jump happened. A stage that
+ * was already reached, and dated, on an earlier update keeps its original
+ * date; only newly-reached stages are filled in.
+ *
+ * @param {{status?: string, displayStatus?: string, stageTimestamps?: Record<string, string>}} submission
+ * @param {string} [at] ISO timestamp to stamp newly-reached stages with; defaults to now.
+ * @returns {Record<string, string>} the merged stage -> ISO timestamp map
+ */
+export function recordStageTimestamps(submission, at = new Date().toISOString()) {
+  const stage = getMappedStage(submission);
+  const flow = stage === 'Rejected' ? REJECTED_FLOW_STAGES : NORMAL_FLOW_STAGES;
+  const targetIndex = flow.indexOf(stage);
+
+  const timestamps = { ...(submission?.stageTimestamps || {}) };
+  if (targetIndex < 0) return timestamps;
+
+  for (let i = 0; i <= targetIndex; i++) {
+    const step = flow[i];
+    if (!timestamps[step]) timestamps[step] = at;
+  }
+  return timestamps;
+}
+
+export default { getMappedStage, isVolunteerStageOpen, recordStageTimestamps, NORMAL_FLOW_STAGES, REJECTED_FLOW_STAGES, ASSIGNABLE_STAGES };

@@ -29,6 +29,7 @@ import curationVolunteerRoutes from './curationVolunteerRoutes.js';
 import { countThreadActivity } from '../db/questions.js';
 import { countCurationVolunteers } from '../db/curationVolunteers.js';
 import { addStudyUpvote, countStudyUpvotes } from '../db/studyUpvotes.js';
+import { ASSIGNABLE_STAGES, recordStageTimestamps } from '../utils/pipelineStages.js';
 
 // Curation team account that submitters must grant data access to.
 export const CURATION_EMAIL = 'cdsicuration@mskcc.org';
@@ -107,7 +108,10 @@ function toPublicSubmission(s) {
     supersededBy: s.supersededBy || null,
     supersededAt: s.supersededAt || null,
     portalStudyUrl: s.portalStudyUrl || null,
+    datahubReadmeUrl: s.datahubReadmeUrl || null,
+    rejectionReason: s.rejectionReason || null,
     leadCuratorName: s.leadCuratorName || null,
+    stageTimestamps: s.stageTimestamps || null,
   };
 }
 
@@ -219,6 +223,7 @@ router.post('/',
       
       // Generate submission ID
       const submissionId = `submission_${uuidv4()}`;
+      const submittedAt = submissionDate();
 
       // Create submission object
       const submission = {
@@ -229,7 +234,8 @@ router.post('/',
         submissionType: formData.actionType, // 'suggest-paper' or 'submit-data'
         publicationType: formData.publicationType, // 'published' or 'preprint'
         status: 'pending',
-        submittedAt: submissionDate(),
+        submittedAt,
+        stageTimestamps: { Submitted: submittedAt },
         
         // Contact information
         submitterName: formData.name || req.user.name,
@@ -583,6 +589,8 @@ router.patch('/:id/status',
     'approved', 
     'rejected'
   ]).withMessage('Invalid status'),
+  body('displayStatus').optional({ values: 'null' }).isIn(ASSIGNABLE_STAGES)
+    .withMessage('Invalid display status'),
   async (req, res) => {
     try {
       // Only super users can update status
@@ -612,9 +620,14 @@ router.patch('/:id/status',
 
       submission.status = req.body.status;
       submission.displayStatus = req.body.displayStatus || null;
-      submission.updatedAt = new Date().toISOString();
+      const now = new Date().toISOString();
+      submission.updatedAt = now;
       submission.statusUpdatedBy = req.user.id;
-      submission.statusUpdatedAt = new Date().toISOString();
+      submission.statusUpdatedAt = now;
+      // A curator can jump straight past several stages in one update — every
+      // stage the jump passed through, skipped or landed-on, gets stamped with
+      // this same moment; stages already dated by an earlier update keep theirs.
+      submission.stageTimestamps = recordStageTimestamps(submission, now);
 
       await saveSubmission(req.params.id, submission);
 
@@ -650,6 +663,8 @@ const OVERVIEW_STRING_LIMITS = {
   linkToData: 2000,
   referenceGenome: 200,
   portalStudyUrl: 2000,
+  datahubReadmeUrl: 2000,
+  rejectionReason: 2000,
 };
 const OVERVIEW_BOOLEAN_FIELDS = new Set([
   'isLeadAuthor',
@@ -774,6 +789,17 @@ router.patch('/:id/overview',
           return res.status(400).json({
             status: 'error',
             message: 'cBioPortal study link must be a valid http or https URL'
+          });
+        }
+      }
+      if (updates.datahubReadmeUrl) {
+        try {
+          const url = new URL(updates.datahubReadmeUrl);
+          if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Invalid protocol');
+        } catch {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Curation & transformation notes link must be a valid http or https URL'
           });
         }
       }

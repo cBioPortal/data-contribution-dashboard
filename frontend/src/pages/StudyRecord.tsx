@@ -141,12 +141,12 @@ const StudyRecord = () => {
                   </span>
                 </div>
 
-                <h1 className="font-serif text-2xl md:text-[28px] leading-snug font-semibold text-gray-900 max-w-4xl">
+                <h1 className="max-w-4xl break-words text-2xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-[28px]">
                   {header.title || header.studyName || 'Untitled submission'}
                 </h1>
 
                 {header.description && (
-                  <p className="mt-2.5 font-serif text-[15px] leading-relaxed text-gray-600 max-w-3xl">
+                  <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-600">
                     {header.description}
                   </p>
                 )}

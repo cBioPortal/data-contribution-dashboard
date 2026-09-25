@@ -117,6 +117,7 @@ export const CurationRecord = ({
   const [canEditDeliverables, setCanEditDeliverables] = useState(false);
   const [canViewDeliverablesSection, setCanViewDeliverablesSection] = useState(false);
   const [canRequestReview, setCanRequestReview] = useState(false);
+  const [canViewReadmeAndActivity, setCanViewReadmeAndActivity] = useState(true);
   const [canReviewCuration, setCanReviewCuration] = useState(false);
   const handleNotesChanged = useCallback((nextNotes: CurationNote[]) => {
     setNotes(nextNotes);
@@ -141,6 +142,7 @@ export const CurationRecord = ({
       setCanEditDeliverables(!!(res.data.permissions?.canEditDeliverables ?? res.data.canEdit));
       setCanViewDeliverablesSection(!!res.data.permissions?.canViewDeliverablesSection);
       setCanRequestReview(!!res.data.permissions?.canRequestReview);
+      setCanViewReadmeAndActivity(res.data.permissions?.canViewReadmeAndActivity ?? true);
       setCanReviewCuration(!!res.data.permissions?.canReviewCuration);
     } catch (e: unknown) {
       logger.warn('Could not load curation record:', e instanceof Error ? e.message : e);
@@ -200,31 +202,33 @@ export const CurationRecord = ({
           onChanged={handleWorkflowChanged}
         />
       )}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-9">
-        <ReadmeColumn
-          submissionId={submissionId}
-          readme={readme}
-          canEdit={canEditReadme}
-          onSaved={setReadme}
-        />
-        <div className="lg:border-l lg:border-gray-100 lg:pl-9">
-          <ActivityColumn
+      {canViewReadmeAndActivity && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-9">
+          <ReadmeColumn
             submissionId={submissionId}
-            notes={notes}
-            canAddNotes={canAddNotes}
-            canAddRejection={canAddRejection}
-            onChanged={handleNotesChanged}
+            readme={readme}
+            canEdit={canEditReadme}
+            onSaved={setReadme}
           />
-          {showPermalink && (
-            <Link
-              to={`/study/${submissionId}`}
-              className="mt-5 inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800"
-            >
-              Open full record <ExternalLink className="h-3 w-3" />
-            </Link>
-          )}
+          <div className="lg:border-l lg:border-gray-100 lg:pl-9">
+            <ActivityColumn
+              submissionId={submissionId}
+              notes={notes}
+              canAddNotes={canAddNotes}
+              canAddRejection={canAddRejection}
+              onChanged={handleNotesChanged}
+            />
+            {showPermalink && (
+              <Link
+                to={`/study/${submissionId}`}
+                className="mt-5 inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800"
+              >
+                Open full record <ExternalLink className="h-3 w-3" />
+              </Link>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

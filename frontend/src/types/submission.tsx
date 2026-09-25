@@ -28,6 +28,11 @@ export interface Submission {
   isDataTransformed?: boolean | null;
   privateAccessEmails?: string;
   portalStudyUrl?: string | null;
+  // Link to the study's README on the cBioPortal Datahub GitHub repo, shown
+  // under the submission-progress stepper once curation notes moved out of
+  // the (currently hidden) Curation & Activity tab.
+  datahubReadmeUrl?: string | null;
+  rejectionReason?: string | null;
   leadCuratorId?: string | null;
   leadCuratorName?: string | null;
   volunteerCount?: number;
@@ -56,6 +61,10 @@ export interface Submission {
   supersededBy?: string | null;
   supersededAt?: string | null;
   submitterNotes?: Array<{ text: string; addedAt: string; addedBy: string }>;
+  // Stage label -> ISO timestamp of when the submission first reached it.
+  // Absent/partial for stages not yet reached; stages skipped in a multi-step
+  // jump share the timestamp of the update that jumped past them.
+  stageTimestamps?: Record<string, string>;
 }
 
 // Define status colors with the updated color palette
@@ -81,6 +90,7 @@ const statusColors: Record<string, string> = {
   "Import in Progress": "bg-teal-200 text-teal-800",
   "Released": "bg-green-800 text-white",
   "In Portal": "bg-green-800 text-white",
+  "Rejected": "bg-red-200 text-red-800",
   "Not Curatable": "bg-red-200 text-red-800",
   "Missing Data": "bg-red-200 text-red-800",
 };
@@ -93,8 +103,8 @@ const statusDescriptions: Record<string, string> = {
   "Approved for Curation": "Your data is approved for curation into cBioPortal.",
   "Preparing for Release": "We are getting ready to make your data public.",
   "Import in Progress": "We are getting ready to make your data public.",
-  "Released": "Your data is now live on the portal!",
-  "Not Curatable": "We reviewed your submission, but unfortunately it doesn't have enough data to move forward at this time.",
+  "Released": "Your data is now live on the cBioPortal!",
+  "Rejected": "We reviewed your submission, but unfortunately it doesn't have enough data to move forward at this time.",
 };
 
 // Helper function to get step number for status
@@ -109,8 +119,8 @@ const getStepNumber = (status: string, trackType: 'suggested-papers' | 'submitte
     'Final Review', 'Preparing for Release', 'Released'
   ];
 
-  const suggestedPapersRejectedFlow = ['Submitted', 'Initial Review', 'Not Curatable'];
-  const submittedDataRejectedFlow = ['Submitted', 'Initial Review', 'Not Curatable'];
+  const suggestedPapersRejectedFlow = ['Submitted', 'Initial Review', 'Rejected'];
+  const submittedDataRejectedFlow = ['Submitted', 'Initial Review', 'Rejected'];
 
   // Map certain statuses to appropriate progress steps
   const getMappedStatus = (status: string): string => {
@@ -125,13 +135,13 @@ const getStepNumber = (status: string, trackType: 'suggested-papers' | 'submitte
     return status;
   };
 
-  const isRejected = status === 'Not Curatable' || status === 'Missing Data';
+  const isRejected = status === 'Rejected' || status === 'Not Curatable' || status === 'Missing Data';
   
   // Determine which flow to use and get the appropriate total steps
   let flowSteps: string[];
   if (isRejected) {
     flowSteps = trackType === 'suggested-papers' ? suggestedPapersRejectedFlow : submittedDataRejectedFlow;
-    const stepIndex = flowSteps.indexOf('Not Curatable');
+    const stepIndex = flowSteps.indexOf('Rejected');
     return stepIndex >= 0 ? `${stepIndex + 1}/${flowSteps.length}` : '';
   } else {
     flowSteps = trackType === 'suggested-papers' ? suggestedPapersNormalFlow : submittedDataNormalFlow;

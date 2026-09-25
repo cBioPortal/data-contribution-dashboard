@@ -1,4 +1,10 @@
-import { getMappedStage, isVolunteerStageOpen } from '../pipelineStages.js';
+import {
+  ASSIGNABLE_STAGES,
+  NORMAL_FLOW_STAGES,
+  getMappedStage,
+  isVolunteerStageOpen,
+  recordStageTimestamps,
+} from '../pipelineStages.js';
 
 // Every displayStatus that exists in the database today, with the stage the
 // tracker draws it at. If the client's flowDefinitions change, this is the file
@@ -16,8 +22,9 @@ const REAL_STATUSES = {
   'Preparing for Release': 'Preparing for Release',
   'Released':              'Released',
   'In Portal':             'Released',
-  'Missing Data':          'Not Curatable',
-  'Not Curatable':         'Not Curatable',
+  'Missing Data':          'Rejected',
+  'Not Curatable':         'Rejected',
+  'Rejected':              'Rejected',
 };
 
 describe('getMappedStage', () => {
@@ -39,7 +46,7 @@ describe('getMappedStage', () => {
       'Final Review',
       'Preparing for Release',
       'Released',
-      'Not Curatable',
+      'Rejected',
     ])('closes volunteering at %s', displayStatus => {
       expect(isVolunteerStageOpen({ displayStatus })).toBe(false);
     });
@@ -49,7 +56,7 @@ describe('getMappedStage', () => {
     // 84 submissions carry status=pending with displayStatus null.
     expect(getMappedStage({ status: 'pending', displayStatus: null })).toBe('Submitted');
     expect(getMappedStage({ status: 'in-progress' })).toBe('Curation in Progress');
-    expect(getMappedStage({ status: 'rejected' })).toBe('Not Curatable');
+    expect(getMappedStage({ status: 'rejected' })).toBe('Rejected');
     expect(getMappedStage({ status: 'in-portal' })).toBe('Released');
   });
 
@@ -69,5 +76,82 @@ describe('getMappedStage', () => {
     expect(getMappedStage({ status: 'some-future-code' })).toBe('some-future-code');
     expect(getMappedStage({})).toBeNull();
     expect(getMappedStage(null)).toBeNull();
+  });
+});
+
+describe('recordStageTimestamps', () => {
+  it('stamps every stage up to and including the current one on first update', () => {
+    const submission = { displayStatus: 'Submitted' };
+    const timestamps = recordStageTimestamps(submission, '2024-01-01T00:00:00.000Z');
+    expect(timestamps).toEqual({ Submitted: '2024-01-01T00:00:00.000Z' });
+  });
+
+  it('gives every stage skipped by a jump the same timestamp', () => {
+    const submission = {
+      displayStatus: 'Curation in Progress',
+      stageTimestamps: { Submitted: '2024-01-01T00:00:00.000Z' },
+    };
+    const timestamps = recordStageTimestamps(submission, '2024-02-01T00:00:00.000Z');
+    expect(timestamps).toEqual({
+      Submitted: '2024-01-01T00:00:00.000Z',
+      'Initial Review': '2024-02-01T00:00:00.000Z',
+      'Approved for Curation': '2024-02-01T00:00:00.000Z',
+      'Curation in Progress': '2024-02-01T00:00:00.000Z',
+    });
+  });
+
+  it('leaves already-dated stages untouched on a later update', () => {
+    const submission = {
+      displayStatus: 'Final Review',
+      stageTimestamps: {
+        Submitted: '2024-01-01T00:00:00.000Z',
+        'Initial Review': '2024-01-05T00:00:00.000Z',
+        'Approved for Curation': '2024-01-05T00:00:00.000Z',
+        'Curation in Progress': '2024-01-05T00:00:00.000Z',
+      },
+    };
+    const timestamps = recordStageTimestamps(submission, '2024-03-01T00:00:00.000Z');
+    expect(timestamps).toEqual({
+      Submitted: '2024-01-01T00:00:00.000Z',
+      'Initial Review': '2024-01-05T00:00:00.000Z',
+      'Approved for Curation': '2024-01-05T00:00:00.000Z',
+      'Curation in Progress': '2024-01-05T00:00:00.000Z',
+      'Final Review': '2024-03-01T00:00:00.000Z',
+    });
+  });
+
+  it('routes a rejection through the short rejected flow', () => {
+    const submission = {
+      displayStatus: 'Rejected',
+      stageTimestamps: { Submitted: '2024-01-01T00:00:00.000Z' },
+    };
+    const timestamps = recordStageTimestamps(submission, '2024-01-10T00:00:00.000Z');
+    expect(timestamps).toEqual({
+      Submitted: '2024-01-01T00:00:00.000Z',
+      'Initial Review': '2024-01-10T00:00:00.000Z',
+      Rejected: '2024-01-10T00:00:00.000Z',
+    });
+  });
+});
+
+describe('one label per stage', () => {
+  it('offers exactly the seven stages plus the single rejection label', () => {
+    expect(ASSIGNABLE_STAGES).toEqual([...NORMAL_FLOW_STAGES, 'Rejected']);
+  });
+
+  it('maps every assignable label to itself', () => {
+    for (const label of ASSIGNABLE_STAGES) {
+      expect(getMappedStage({ displayStatus: label })).toBe(label);
+    }
+  });
+
+  it('labels a bare status code with a main stage, never a sub-label', () => {
+    for (const status of ['pending', 'received', 'in-progress', 'in-review',
+      'missing-data', 'not-curatable', 'approved', 'rejected']) {
+      expect(ASSIGNABLE_STAGES).toContain(getMappedStage({ status }));
+    }
+    expect(getMappedStage({ status: 'received' })).toBe('Initial Review');
+    expect(getMappedStage({ status: 'in-review' })).toBe('Final Review');
+    expect(getMappedStage({ status: 'missing-data' })).toBe('Rejected');
   });
 });

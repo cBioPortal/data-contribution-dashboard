@@ -41,6 +41,22 @@ import logger from '../utils/logger.js';
 // mergeParams so :id from the parent mount is visible here.
 const router = express.Router({ mergeParams: true });
 
+/**
+ * README editing and the activity log are paused for everyone while the
+ * workflow they support is reworked. The endpoints and UI are kept intact —
+ * flip this back to `true` to restore them; nothing else needs to change.
+ */
+const README_AND_NOTES_ENABLED = false;
+
+/** Refuses a README or note write while that feature is paused. */
+function requireReadmeAndNotesEnabled(req, res, next) {
+  if (README_AND_NOTES_ENABLED) return next();
+  return res.status(403).json({
+    status: 'error',
+    message: 'Editing the curation README and activity log is temporarily disabled',
+  });
+}
+
 const MAX_NOTE = 5000;
 const MAX_SECTION = 20000;
 const COMMUNITY_NOTE_KINDS = new Set(['note', 'transformation', 'decision']);
@@ -192,16 +208,20 @@ router.get('/', optionalAuth, async (req, res) => {
           // the team. Curators see who wrote what; nobody else does.
           authorEmail: access.isSuper ? n.authorEmail : undefined,
           authorId: access.isSuper ? n.authorId : undefined,
-          canEdit: access.isSuper ||
-            (isAssignedCommunityCurator && n.authorId === req.user?.id),
+          canEdit: README_AND_NOTES_ENABLED && (access.isSuper ||
+            (isAssignedCommunityCurator && n.authorId === req.user?.id)),
         })),
         canEdit: canContribute,
         permissions: {
-          canEditReadme: canContribute,
+          canEditReadme: README_AND_NOTES_ENABLED && canContribute,
           canEditDeliverables: canContribute,
-          canAddNotes: canContribute,
+          canAddNotes: README_AND_NOTES_ENABLED && canContribute,
           canAddRejection: access.isSuper,
-          canViewDeliverablesSection: ['accepted', 'completed'].includes(ownApplication?.status),
+          canViewDeliverablesSection: canViewDeliverables,
+          // A community curator hands their work off through the deliverables
+          // section; the README and activity log are the curation team's tools.
+          canViewReadmeAndActivity: access.isSuper ||
+            !['accepted', 'completed'].includes(ownApplication?.status),
           canRequestReview: isAssignedCommunityCurator,
           canReviewCuration: access.isSuper &&
             communityCurator?.status === 'accepted' &&
@@ -272,7 +292,7 @@ router.put('/deliverables', authenticateToken, async (req, res) => {
  * PUT /api/submit/:id/record/readme
  * Replace the README. Curation team or assigned Community Curator.
  */
-router.put('/readme', authenticateToken, async (req, res) => {
+router.put('/readme', authenticateToken, requireReadmeAndNotesEnabled, async (req, res) => {
   try {
     const access = await resolveWriteAccess(req, res);
     if (!access) return;
@@ -305,7 +325,7 @@ router.put('/readme', authenticateToken, async (req, res) => {
  * POST /api/submit/:id/record/notes
  * Append a note. Curation team or assigned Community Curator.
  */
-router.post('/notes', authenticateToken, async (req, res) => {
+router.post('/notes', authenticateToken, requireReadmeAndNotesEnabled, async (req, res) => {
   try {
     const access = await resolveWriteAccess(req, res);
     if (!access) return;
@@ -355,7 +375,7 @@ router.post('/notes', authenticateToken, async (req, res) => {
  * PATCH /api/submit/:id/record/notes/:noteId
  * Rewrite a note's text. Assigned Community Curators may edit only their own.
  */
-router.patch('/notes/:noteId', authenticateToken, async (req, res) => {
+router.patch('/notes/:noteId', authenticateToken, requireReadmeAndNotesEnabled, async (req, res) => {
   try {
     const access = await resolveWriteAccess(req, res);
     if (!access) return;
@@ -396,7 +416,7 @@ router.patch('/notes/:noteId', authenticateToken, async (req, res) => {
  * DELETE /api/submit/:id/record/notes/:noteId
  * Retract a note. Assigned Community Curators may retract only their own.
  */
-router.delete('/notes/:noteId', authenticateToken, async (req, res) => {
+router.delete('/notes/:noteId', authenticateToken, requireReadmeAndNotesEnabled, async (req, res) => {
   try {
     const access = await resolveWriteAccess(req, res);
     if (!access) return;

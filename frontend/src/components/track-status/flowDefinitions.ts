@@ -38,7 +38,7 @@ export const stepDescriptions: Record<string, string> = {
   'Curation in Progress': 'We are preparing and organizing your data for the portal.',
   'Final Review': 'We are doing a final internal check to ensure everything is accurate.',
   'Preparing for Release': 'We are getting ready to make your data public.',
-  'Released': 'Your data is now live on the portal!',
+  'Released': 'Your data is now live on the cBioPortal!',
   'Rejected': "We reviewed your submission, but unfortunately it doesn't have enough data to move forward at this time."
 };
 
@@ -77,8 +77,8 @@ export const getMappedStatus = (status: string, trackType: 'suggested-papers' | 
   // Map In Portal to Released
   if (status === 'In Portal') return 'Released';
 
-  // Map Missing Data to Not Curatable
-  if (status === 'Missing Data') return 'Not Curatable';
+  // Retired rejection labels map to Rejected
+  if (status === 'Missing Data' || status === 'Not Curatable') return 'Rejected';
   
   // Map legacy labels to the current Step 3 name.
   if (status === 'Approved for Portal Curation' || status === 'Approved for Portal') {

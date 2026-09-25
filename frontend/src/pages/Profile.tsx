@@ -259,7 +259,7 @@ const Profile = () => {
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-slate-500">Studies currently assigned to you for community curation.</p>
+                    <p className="text-sm text-slate-500">Studies assigned to you. When you've finished curating, submit your curated data for review.</p>
                   </CardHeader>
                   <CardContent className="pt-0">
                     {data.activeAssignments.studies.length === 0 ? (
@@ -288,9 +288,14 @@ const Profile = () => {
                             </div>
                             <Link
                               to={`/study/${study.submissionId}`}
-                              className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-[#2C5EBE] hover:text-[#1A3B6D]"
+                              className={study.reviewRequestedAt
+                                ? 'inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+                                : 'inline-flex shrink-0 items-center gap-1.5 rounded-md bg-[#2C5EBE] px-3 py-2 text-sm font-semibold text-white hover:bg-[#1A3B6D]'}
                             >
-                              {study.reviewRequestedAt ? 'View curation' : 'Continue curation'}
+                              <FileCheck2 className="h-4 w-4" />
+                              {study.reviewRequestedAt
+                                ? 'View submitted data'
+                                : study.reviewFeedback ? 'Resubmit curated data' : 'Submit curated data'}
                               <ArrowRight className="h-4 w-4" />
                             </Link>
                           </div>

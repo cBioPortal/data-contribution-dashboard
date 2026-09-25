@@ -30,6 +30,12 @@ import SubmissionVolumeChart from "@/components/analytics/SubmissionVolumeChart"
 import SubmissionMixChart from "@/components/analytics/SubmissionMixChart";
 import CommunityCurationStats from "@/components/analytics/CommunityCurationStats";
 
+/**
+ * The community curation section is paused for now — not removed, just hidden.
+ * Flip this back to `true` to bring it back; nothing else needs to change.
+ */
+const SHOW_COMMUNITY_CURATION_STATS = false;
+
 // Import tracker data (still used for cumulative growth)
 import issuesData from "@/data/issues.txt?raw";
 import pullRequestsData from "@/data/pull_requests.txt?raw";
@@ -81,6 +87,7 @@ const Analytics = () => {
   } = useQuery({
     queryKey: ['community-contributions'],
     queryFn: fetchCommunityContributions,
+    enabled: SHOW_COMMUNITY_CURATION_STATS,
   });
 
   useEffect(() => {
@@ -176,12 +183,14 @@ const Analytics = () => {
             <SubmissionMixChart />
           </div>
 
-          <CommunityCurationStats
-            completedCurations={contributionMetrics.completedCurations}
-            contributors={contributionMetrics.contributors}
-            monthlyTrend={contributionMetrics.monthlyTrend}
-            isLoading={contributionsLoading}
-          />
+          {SHOW_COMMUNITY_CURATION_STATS && (
+            <CommunityCurationStats
+              completedCurations={contributionMetrics.completedCurations}
+              contributors={contributionMetrics.contributors}
+              monthlyTrend={contributionMetrics.monthlyTrend}
+              isLoading={contributionsLoading}
+            />
+          )}
 
         </div>
       </div>

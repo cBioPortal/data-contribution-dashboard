@@ -90,6 +90,67 @@ UPDATE submissions
        updated_at = now()
  WHERE doc->>'displayStatus' IN ('Approved for Portal', 'Approved for Portal Curation');
 
+-- One label per stage. Sub-labels (Clarification Needed, Missing Data, …) are
+-- retired: each submission is rewritten to its stage's main label, and the
+-- status code is realigned to the one the tracker's dropdown sends for it.
+-- A submission with no displayStatus is labelled from its code, preserving the
+-- stage it was already shown at ('received' was drawn at Submitted).
+-- updated_at is left alone: this is a relabel, not a change to the submission.
+-- Unrecognised labels are left untouched rather than guessed at.
+WITH mapped AS (
+  SELECT id,
+         CASE
+           WHEN doc->>'displayStatus' IN ('Submitted', 'Initial Review', 'Approved for Curation',
+                                          'Curation in Progress', 'Final Review',
+                                          'Preparing for Release', 'Released', 'Rejected')
+             THEN doc->>'displayStatus'
+           WHEN doc->>'displayStatus' IN ('Awaiting Review', 'Submission', 'Received') THEN 'Submitted'
+           WHEN doc->>'displayStatus' = 'Pending Review' THEN 'Initial Review'
+           WHEN doc->>'displayStatus' IN ('Clarification Needed', 'Changes Requested',
+                                          'Awaiting Submitter''s Response',
+                                          'Awaiting Submitters Response', 'In Progress')
+             THEN 'Curation in Progress'
+           WHEN doc->>'displayStatus' IN ('Under Review', 'In Review') THEN 'Final Review'
+           WHEN doc->>'displayStatus' IN ('Missing Data', 'Not Curatable') THEN 'Rejected'
+           WHEN NULLIF(doc->>'displayStatus', '') IS NULL THEN
+             CASE status
+               WHEN 'received'      THEN 'Submitted'
+               WHEN 'in-progress'   THEN 'Curation in Progress'
+               WHEN 'in-review'     THEN 'Final Review'
+               WHEN 'approved'      THEN 'Released'
+               WHEN 'missing-data'  THEN 'Rejected'
+               WHEN 'not-curatable' THEN 'Rejected'
+               WHEN 'rejected'      THEN 'Rejected'
+             END
+         END AS label
+    FROM submissions
+), coded AS (
+  SELECT id, label,
+         CASE label
+           WHEN 'Submitted'             THEN 'pending'
+           WHEN 'Initial Review'        THEN 'received'
+           WHEN 'Approved for Curation' THEN 'received'
+           WHEN 'Curation in Progress'  THEN 'in-progress'
+           WHEN 'Final Review'          THEN 'in-review'
+           WHEN 'Preparing for Release' THEN 'in-review'
+           WHEN 'Released'              THEN 'approved'
+           WHEN 'Rejected'              THEN 'not-curatable'
+         END AS code
+    FROM mapped
+   WHERE label IS NOT NULL
+)
+UPDATE submissions s
+   SET status = c.code,
+       doc = jsonb_set(
+         jsonb_set(s.doc, '{status}', to_jsonb(c.code), true),
+         '{displayStatus}', to_jsonb(c.label), true
+       )
+  FROM coded c
+ WHERE s.id = c.id
+   AND (s.doc->>'displayStatus' IS DISTINCT FROM c.label
+        OR s.status IS DISTINCT FROM c.code
+        OR s.doc->>'status' IS DISTINCT FROM c.code);
+
 CREATE INDEX IF NOT EXISTS submissions_user_id_idx ON submissions (user_id);
 CREATE INDEX IF NOT EXISTS submissions_status_idx  ON submissions (status);
 CREATE INDEX IF NOT EXISTS submissions_pubtype_idx ON submissions (publication_type);
@@ -169,6 +230,26 @@ CREATE TABLE IF NOT EXISTS curation_notes (
 -- Every read is "the notes on this submission, oldest first".
 CREATE INDEX IF NOT EXISTS curation_notes_submission_idx
   ON curation_notes (submission_id, created_at);
+
+-- Notes are filed under the stage the submission was in; bring any filed under
+-- a retired sub-label onto its main stage too.
+UPDATE curation_notes
+   SET stage = CASE
+         WHEN stage IN ('Awaiting Review', 'Submission', 'Received') THEN 'Submitted'
+         WHEN stage = 'Pending Review' THEN 'Initial Review'
+         WHEN stage IN ('Approved for Portal', 'Approved for Portal Curation') THEN 'Approved for Curation'
+         WHEN stage IN ('Clarification Needed', 'Changes Requested', 'Awaiting Submitter''s Response',
+                        'Awaiting Submitters Response', 'In Progress') THEN 'Curation in Progress'
+         WHEN stage IN ('Under Review', 'In Review') THEN 'Final Review'
+         WHEN stage = 'Import in Progress' THEN 'Preparing for Release'
+         WHEN stage = 'In Portal' THEN 'Released'
+         WHEN stage IN ('Missing Data', 'Not Curatable') THEN 'Rejected'
+       END
+ WHERE stage IN ('Awaiting Review', 'Submission', 'Received', 'Pending Review',
+                 'Approved for Portal', 'Approved for Portal Curation',
+                 'Clarification Needed', 'Changes Requested', 'Awaiting Submitter''s Response',
+                 'Awaiting Submitters Response', 'In Progress', 'Under Review', 'In Review',
+                 'Import in Progress', 'In Portal', 'Missing Data', 'Not Curatable');
 
 -- ─── Questions: threads on a submission ──────────────────────────────────────
 -- Two conversations share this table, told apart by `visibility`: a submitter
