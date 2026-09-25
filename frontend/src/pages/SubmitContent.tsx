@@ -19,6 +19,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -41,6 +42,29 @@ import { FileText, Info, ArrowRight, ExternalLink, CheckCircle, LogIn, Clock, Se
 import { submitContent } from "@/services/api";
 import { Submission } from "@/types/submission";
 import { useAuthToken } from '@/hooks/useAuthToken';
+import { usePublicationLookup, type PublicationMetadata } from '@/hooks/usePublicationLookup';
+import PublicationLookupCard from '@/components/submit/PublicationLookupCard';
+import { cn } from '@/lib/utils';
+
+/** The four form fields the publication lookup can fill. */
+type LookupField = 'paperTitle' | 'journal' | 'authors' | 'publicationYear';
+
+const LOOKUP_FIELDS: LookupField[] = ['paperTitle', 'journal', 'authors', 'publicationYear'];
+
+/**
+ * Marks a field the lookup overwrote, with a one-click way back.
+ *
+ * The point of showing this per field rather than as a single undo is that the
+ * submitter may want the fetched title but their own wording of the journal.
+ */
+const LookupFilled = ({ onRevert }: { onRevert: () => void }) => (
+  <p className="mt-1 flex items-center gap-2 text-xs text-blue-700">
+    <span>Filled from the publication record</span>
+    <button type="button" onClick={onRevert} className="underline hover:no-underline">
+      revert
+    </button>
+  </p>
+);
 
 type PublicationType = "published" | "preprint" | null;
 type ActionType = "suggest-paper" | "submit-data" | null;
@@ -197,6 +221,51 @@ const SubmitContent = () => {
   // the sign-in prompt does not flash for a user who is in fact logged in.
   const authToken = useAuthToken();
   const isLoggedIn = !!authToken;
+
+  const lookup = usePublicationLookup();
+  // Fields the lookup last wrote, mapped to what they held beforehand, so each
+  // can be put back individually. Applying overwrites rather than filling only
+  // blanks — the published record is the better source — but nothing is
+  // discarded silently: every changed field is marked and revertible.
+  const [lookupPrevious, setLookupPrevious] = useState<Partial<Record<LookupField, string>>>({});
+
+  /**
+   * Write the resolved metadata into the form.
+   *
+   * Overwrites rather than filling blanks only: the publisher's record is the
+   * better source, and a submitter who has typed an approximation of the title
+   * usually wants the real one. What makes that safe is that every field it
+   * changes is recorded here first, marked in the UI, and revertible one by one.
+   */
+  const applyLookup = (metadata: PublicationMetadata) => {
+    const previous: Partial<Record<LookupField, string>> = {};
+
+    for (const field of LOOKUP_FIELDS) {
+      const incoming = (metadata[field] || '').trim();
+      // Nothing to offer for this field, so leave whatever is there alone.
+      if (!incoming) continue;
+
+      const current = String(form.getValues(field) ?? '');
+      if (current === incoming) continue;
+
+      previous[field] = current;
+      form.setValue(field, incoming, { shouldDirty: true, shouldValidate: true });
+    }
+
+    setLookupPrevious(previous);
+    lookup.dismiss();
+  };
+
+  /** Put one field back to what the submitter had before the lookup wrote it. */
+  const revertLookupField = (field: LookupField) => {
+    form.setValue(field, lookupPrevious[field] ?? '', { shouldDirty: true, shouldValidate: true });
+    setLookupPrevious(prev => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
 
   const doRedirect = (tab: string) => {
     if (redirectTimerRef.current) clearInterval(redirectTimerRef.current);
@@ -749,9 +818,41 @@ const SubmitContent = () => {
                                   className="shadow-sm"
                                   required
                                   {...field}
+                                  // Look up on blur and on paste, not on every
+                                  // keystroke: a PMID typed digit by digit would
+                                  // otherwise fire a request per character, each
+                                  // briefly resolving to a different paper.
+                                  onBlur={(e) => {
+                                    field.onBlur();
+                                    void lookup.run(e.target.value);
+                                  }}
+                                  onPaste={(e) => {
+                                    const pasted = e.clipboardData.getData('text');
+                                    if (pasted.trim()) void lookup.run(pasted);
+                                  }}
+                                  onChange={(e) => {
+                                    field.onChange(e);
+                                    if (!e.target.value.trim()) lookup.reset();
+                                  }}
                                 />
                               </FormControl>
+                              {/* Stated before anything is attempted: a
+                                  submitter who does not know the form tries this
+                                  cannot make sense of a message saying it
+                                  failed. */}
+                              <FormDescription className="text-xs">
+                                We'll try to fill in the study details below from this.
+                              </FormDescription>
                               <FormMessage />
+                              <PublicationLookupCard
+                                status={lookup.status}
+                                metadata={lookup.metadata}
+                                duplicate={lookup.duplicate}
+                                reason={lookup.reason}
+                                expectedType="published"
+                                onApply={() => lookup.metadata && applyLookup(lookup.metadata)}
+                                onDismiss={lookup.dismiss}
+                              />
                             </FormItem>
                           )}
                         />
@@ -766,11 +867,14 @@ const SubmitContent = () => {
                               <FormControl>
                                 <Input
                                   placeholder="Enter the full title of the study"
-                                  className="shadow-sm"
+                                  className={cn("shadow-sm", lookupPrevious.paperTitle !== undefined && "ring-1 ring-blue-300 bg-blue-50/40")}
                                   {...field}
                                 />
                               </FormControl>
                               <FormMessage />
+                              {lookupPrevious.paperTitle !== undefined && (
+                                <LookupFilled onRevert={() => revertLookupField('paperTitle')} />
+                              )}
                             </FormItem>
                           )}
                         />
@@ -785,11 +889,14 @@ const SubmitContent = () => {
                               <FormControl>
                                 <Input
                                   placeholder="e.g. Nature, GEO, TCGA portal"
-                                  className="shadow-sm"
+                                  className={cn("shadow-sm", lookupPrevious.journal !== undefined && "ring-1 ring-blue-300 bg-blue-50/40")}
                                   {...field}
                                 />
                               </FormControl>
                               <FormMessage />
+                              {lookupPrevious.journal !== undefined && (
+                                <LookupFilled onRevert={() => revertLookupField('journal')} />
+                              )}
                             </FormItem>
                           )}
                         />
@@ -804,12 +911,15 @@ const SubmitContent = () => {
                                 <FormLabel className="text-gray-700">Authors</FormLabel>
                                 <FormControl>
                                   <Input
-                                    placeholder="e.g. Smith J, Jones A, et al."
-                                    className="shadow-sm"
+                                    placeholder="e.g. Smith et al."
+                                    className={cn("shadow-sm", lookupPrevious.authors !== undefined && "ring-1 ring-blue-300 bg-blue-50/40")}
                                     {...field}
                                   />
                                 </FormControl>
                                 <FormMessage />
+                                {lookupPrevious.authors !== undefined && (
+                                  <LookupFilled onRevert={() => revertLookupField('authors')} />
+                                )}
                               </FormItem>
                             )}
                           />
@@ -822,12 +932,15 @@ const SubmitContent = () => {
                                 <FormControl>
                                   <Input
                                     placeholder="e.g. 2024"
-                                    className="shadow-sm"
+                                    className={cn("shadow-sm", lookupPrevious.publicationYear !== undefined && "ring-1 ring-blue-300 bg-blue-50/40")}
                                     maxLength={4}
                                     {...field}
                                   />
                                 </FormControl>
                                 <FormMessage />
+                                {lookupPrevious.publicationYear !== undefined && (
+                                  <LookupFilled onRevert={() => revertLookupField('publicationYear')} />
+                                )}
                               </FormItem>
                             )}
                           />

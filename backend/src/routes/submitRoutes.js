@@ -12,9 +12,9 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import { v4 as uuidv4 } from 'uuid';
 import { getSubmission, listSubmissions, saveSubmission, removeSubmission } from '../db/submissions.js';
-import { createUser, findUserByEmail } from '../db/users.js';
+import { createUser, findUserByEmail, findUserById } from '../db/users.js';
 import { authenticateToken, optionalAuth } from '../middleware/auth.js';
-import { notifyNewSubmission, notifyNoteAdded } from '../utils/slack.js';
+import { notifyNewSubmission } from '../utils/slack.js';
 import {
   normalizeIdentifier,
   findConflict,
@@ -22,20 +22,55 @@ import {
 } from '../utils/duplicateDetection.js';
 import logger from '../utils/logger.js';
 import { isOwnedBy } from '../utils/ownership.js';
+import { lookupPublication } from '../utils/publicationLookup.js';
+import curationRecordRoutes from './curationRecordRoutes.js';
+import questionRoutes from './questionRoutes.js';
+import curationVolunteerRoutes from './curationVolunteerRoutes.js';
+import { countThreadActivity } from '../db/questions.js';
+import { countCurationVolunteers } from '../db/curationVolunteers.js';
+import { addStudyUpvote, countStudyUpvotes } from '../db/studyUpvotes.js';
+import { ASSIGNABLE_STAGES, recordStageTimestamps } from '../utils/pipelineStages.js';
 
 // Curation team account that submitters must grant data access to.
 export const CURATION_EMAIL = 'cdsicuration@mskcc.org';
 
 const router = express.Router();
 
+const submissionDate = () => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${value.year}-${value.month}-${value.day}`;
+};
+
+// The README and activity log for one submission live under the submission they
+// describe. Mounted before the parameterised routes below so /:id/record is not
+// swallowed by GET /:id.
+router.use('/:id/record', curationRecordRoutes);
+router.use('/:id/questions', questionRoutes);
+router.use('/:id/curation-volunteers', curationVolunteerRoutes);
+
 /**
  * Public-safe projection of a submission.
  *
- * The full submission document contains submitter PII (email, alternative
- * email, contact preference), restricted fields (privateAccessEmails), and
- * internal curation content (curationNotes, submitterNotes). None of that may
- * be exposed on the unauthenticated /public endpoint — only non-sensitive
- * bibliographic/status fields needed to render the public board are returned.
+ * Everything on a published submission is public except the submitter's
+ * identity. Dropped: submitterName, submitterEmail, alternativeEmail,
+ * canContactEmail, privateAccessEmails, and curationNotesUpdatedBy.
+ *
+ * The curation record is not here either, for size rather than secrecy: see
+ * curationRecordRoutes, which serves it per submission.
+ *
+ * userId is withheld for a different reason, not privacy: the client identifies
+ * an owned record by the presence of a matching userId or email, so a public
+ * projection carrying it would drop other people's submissions into a user's own
+ * "My Submissions" list.
+ *
+ * Still an allow-list on purpose — a field added to the submission document
+ * later stays private until it is named here.
  */
 function toPublicSubmission(s) {
   return {
@@ -45,6 +80,7 @@ function toPublicSubmission(s) {
     status: s.status,
     displayStatus: s.displayStatus,
     submittedAt: s.submittedAt,
+    updatedAt: s.updatedAt,
     // Study / paper bibliographic info (already public for published work)
     paperTitle: s.paperTitle,
     studyName: s.studyName,
@@ -54,14 +90,28 @@ function toPublicSubmission(s) {
     publicationYear: s.publicationYear,
     pmid: s.pmid,
     associatedPaper: s.associatedPaper,
-    linkToData: s.linkToData,
-    dataTypes: s.dataTypes,
-    referenceGenome: s.referenceGenome,
-    isDataTransformed: s.isDataTransformed,
     isLeadAuthor: s.isLeadAuthor,
-    submitterName: s.submitterName,
+    wantsToHelpCurate: s.wantsToHelpCurate,
+    // Data submission detail
+    linkToData: s.linkToData,
+    accessGranted: s.accessGranted === true,
+    isDataTransformed: s.isDataTransformed,
+    referenceGenome: s.referenceGenome,
+    dataTypes: s.dataTypes,
+    otherDataType: s.otherDataType,
+    sharingPreference: s.sharingPreference,
+    // Free text the submitter wrote on the form. The curation record — README
+    // and notes — is deliberately absent: it is fetched per submission from
+    // /api/submit/:id/record when a row is expanded, so a list of 84 studies
+    // does not carry every word ever written about them.
+    notes: s.notes,
     supersededBy: s.supersededBy || null,
     supersededAt: s.supersededAt || null,
+    portalStudyUrl: s.portalStudyUrl || null,
+    datahubReadmeUrl: s.datahubReadmeUrl || null,
+    rejectionReason: s.rejectionReason || null,
+    leadCuratorName: s.leadCuratorName || null,
+    stageTimestamps: s.stageTimestamps || null,
   };
 }
 
@@ -76,12 +126,31 @@ router.get('/public', async (req, res) => {
   try {
     // Only published submissions are public; pre-publication submissions are
     // restricted to super users and their submitter (served via GET /api/submit).
-    // Each is reduced to a public-safe projection so submitter PII and internal
-    // curation notes are never exposed to unauthenticated callers.
+    // Each is reduced to a public-safe projection: everything but the submitter's
+    // name and contact details, curation notes included.
     const all = await listSubmissions();
     const submissions = all
       .filter(s => s.publicationType === 'published')
       .map(toPublicSubmission);
+    const submissionIds = submissions.map(s => s.id);
+    const [questionActivity, volunteerState, upvoteState] = await Promise.all([
+      countThreadActivity(submissionIds),
+      countCurationVolunteers(submissionIds),
+      countStudyUpvotes(submissionIds),
+    ]);
+    submissions.forEach((submission) => {
+      submission.questionCount = questionActivity[submission.id]?.total ?? 0;
+      submission.needsResponseCount = 0;
+      submission.latestQuestionActivityAt =
+        questionActivity[submission.id]?.latestActivityAt ?? null;
+      submission.volunteerCount = volunteerState[submission.id]?.volunteerCount ?? 0;
+      submission.curationInterestAccepted =
+        volunteerState[submission.id]?.curationInterestAccepted ?? false;
+      submission.hasVolunteered = false;
+      submission.myVolunteerStatus = null;
+      submission.upvoteCount = upvoteState[submission.id]?.upvoteCount ?? 0;
+      submission.hasUpvoted = false;
+    });
 
     submissions.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
 
@@ -94,80 +163,6 @@ router.get('/public', async (req, res) => {
     res.status(500).json({ status: 'error', message: 'Failed to fetch submissions' });
   }
 });
-
-/**
- * POST /api/submit/bulk-import
- * Bulk import study suggestions (e.g. from GitHub issues).
- * Super users only.
- * Body: { submissions: [...], clearExisting: boolean }
- *   clearExisting: if true, deletes all existing suggest-paper / github-import entries first.
- */
-router.post('/bulk-import',
-  authenticateToken,
-  async (req, res) => {
-    try {
-      if (req.user.role !== 'super') {
-        return res.status(403).json({ status: 'error', message: 'Super users only' });
-      }
-
-      const { submissions = [], clearExisting = false } = req.body;
-
-      if (!Array.isArray(submissions) || submissions.length === 0) {
-        return res.status(400).json({ status: 'error', message: 'No submissions provided' });
-      }
-
-      let deleted = 0;
-
-      // Optionally wipe existing study-suggestion / github-import entries
-      if (clearExisting) {
-        const existing = await listSubmissions();
-        const toDelete = existing
-          .filter(val =>
-            val.id.startsWith('github_') ||
-            val.submissionType === 'suggest-paper' ||
-            val.source === 'github-import'
-          )
-          .map(val => val.id);
-        for (const key of toDelete) {
-          await removeSubmission(key);
-        }
-        deleted = toDelete.length;
-        logger.info(`🗑️  Bulk import: deleted ${deleted} existing study-suggestion entries`);
-      }
-
-      // Insert each submission
-      let imported = 0;
-      const seenKeys = new Set();
-
-      for (const sub of submissions) {
-        if (!sub.id) continue;
-
-        // Ensure unique key (handle duplicate PMIDs)
-        let key = sub.id;
-        let suffix = 1;
-        while (seenKeys.has(key)) {
-          key = `${sub.id}_${suffix++}`;
-        }
-        seenKeys.add(key);
-
-        await saveSubmission(key, { ...sub, id: key });
-        imported++;
-      }
-
-      logger.info(`✅ Bulk import complete: ${imported} inserted, ${deleted} deleted`);
-
-      res.status(201).json({
-        status: 'success',
-        message: 'Bulk import complete',
-        data: { deleted, imported }
-      });
-
-    } catch (error) {
-      logger.error('Bulk import error:', error);
-      res.status(500).json({ status: 'error', message: 'Bulk import failed', error: error.message });
-    }
-  }
-);
 
 /**
  * POST /api/submit
@@ -228,6 +223,7 @@ router.post('/',
       
       // Generate submission ID
       const submissionId = `submission_${uuidv4()}`;
+      const submittedAt = submissionDate();
 
       // Create submission object
       const submission = {
@@ -238,7 +234,8 @@ router.post('/',
         submissionType: formData.actionType, // 'suggest-paper' or 'submit-data'
         publicationType: formData.publicationType, // 'published' or 'preprint'
         status: 'pending',
-        submittedAt: new Date().toISOString(),
+        submittedAt,
+        stageTimestamps: { Submitted: submittedAt },
         
         // Contact information
         submitterName: formData.name || req.user.name,
@@ -287,6 +284,45 @@ router.post('/',
         for (const field of [formData.pmid, formData.associatedPaper, formData.linkToData]) {
           const n = normalizeIdentifier(field);
           if (n) incomingIds.add(n);
+        }
+
+        // Match on what the paper *is*, not only on the string that happened to
+        // be typed. Every existing submission here is keyed by PMID, so pasting
+        // the DOI of a study already suggested produced two different keys for
+        // one paper, no overlap, and a duplicate that sailed straight through.
+        // Resolving the identifier yields both keys and closes that.
+        //
+        // Cheap in the normal flow: the submit form has just looked the same
+        // identifier up, so this is served from that cache. And never fatal —
+        // lookupPublication does not throw, and an identifier it cannot resolve
+        // leaves the set exactly as it was, which is the previous behaviour.
+        // Bounded, and in parallel: duplicate detection is worth a moment, but a
+        // slow index must never hold up a submission. Two fields against two
+        // sources could otherwise stack four five-second timeouts onto the
+        // submit path. On timeout the set is left exactly as it was.
+        try {
+          const resolutions = await Promise.race([
+            Promise.all(
+              [formData.pmid, formData.associatedPaper]
+                .filter(Boolean)
+                .map(field => lookupPublication(field)),
+            ),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('identifier resolution timed out')), 3000),
+            ),
+          ]);
+
+          for (const resolved of resolutions) {
+            if (!resolved.found) continue;
+            for (const alias of [resolved.metadata.pmid, resolved.metadata.doi]) {
+              const n = normalizeIdentifier(alias);
+              if (n) incomingIds.add(n);
+            }
+          }
+        } catch (err) {
+          // Falls back to matching on the typed string alone — the behaviour
+          // before this block existed. A submission is never lost to it.
+          logger.warn(`Identifier resolution skipped for duplicate check: ${err.message}`);
         }
 
         // Load all submissions once for both duplicate-detection layers
@@ -450,6 +486,35 @@ router.get('/',
       const submissions = all.filter(submission =>
         req.user.role === 'super' || isOwnedBy(submission, req.user)
       );
+      const submissionIds = submissions.map(submission => submission.id);
+      const visibleVolunteerIds = all
+        .filter(submission =>
+          submission.publicationType === 'published' ||
+          req.user.role === 'super' ||
+          isOwnedBy(submission, req.user))
+        .map(submission => submission.id);
+      const [questionActivity, volunteerState, upvoteState] = await Promise.all([
+        countThreadActivity(submissionIds, {
+          includePrivate: true,
+          responder: req.user.role === 'super' ? 'curator' : 'submitter',
+          viewerId: req.user.id,
+        }),
+        countCurationVolunteers(visibleVolunteerIds, req.user.id),
+        countStudyUpvotes(visibleVolunteerIds, req.user.id),
+      ]);
+      submissions.forEach((submission) => {
+        submission.questionCount = questionActivity[submission.id]?.total ?? 0;
+        submission.needsResponseCount = questionActivity[submission.id]?.needsResponse ?? 0;
+        submission.latestQuestionActivityAt =
+          questionActivity[submission.id]?.latestActivityAt ?? null;
+        submission.volunteerCount = volunteerState[submission.id]?.volunteerCount ?? 0;
+        submission.curationInterestAccepted =
+          volunteerState[submission.id]?.curationInterestAccepted ?? false;
+        submission.hasVolunteered = volunteerState[submission.id]?.hasVolunteered ?? false;
+        submission.myVolunteerStatus = volunteerState[submission.id]?.myVolunteerStatus ?? null;
+        submission.upvoteCount = upvoteState[submission.id]?.upvoteCount ?? 0;
+        submission.hasUpvoted = upvoteState[submission.id]?.hasUpvoted ?? false;
+      });
 
       // Sort by submission date (newest first)
       submissions.sort((a, b) => 
@@ -460,7 +525,9 @@ router.get('/',
         status: 'success',
         data: {
           submissions,
-          count: submissions.length
+          count: submissions.length,
+          volunteerState,
+          upvoteState,
         }
       });
       
@@ -473,6 +540,37 @@ router.get('/',
     }
   }
 );
+
+/**
+ * POST /api/submit/:id/upvote
+ * Add the signed-in user's vote for a published study suggestion.
+ */
+router.post('/:id/upvote', authenticateToken, async (req, res) => {
+  try {
+    const submission = await getSubmission(req.params.id);
+    if (!submission) {
+      return res.status(404).json({ status: 'error', message: 'Submission not found' });
+    }
+    if (submission.submissionType !== 'suggest-paper' || submission.publicationType !== 'published') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Only published study suggestions can be upvoted',
+      });
+    }
+
+    const result = await addStudyUpvote(req.params.id, req.user.id);
+    return res.status(result.created ? 201 : 200).json({
+      status: 'success',
+      data: {
+        upvoteCount: result.upvoteCount,
+        hasUpvoted: true,
+      },
+    });
+  } catch (error) {
+    logger.error('Study upvote error:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to upvote study' });
+  }
+});
 
 /**
  * PATCH /api/submit/:id/status
@@ -488,10 +586,11 @@ router.patch('/:id/status',
     'in-review',
     'missing-data',
     'not-curatable',
-    'in-portal',
     'approved', 
     'rejected'
   ]).withMessage('Invalid status'),
+  body('displayStatus').optional({ values: 'null' }).isIn(ASSIGNABLE_STAGES)
+    .withMessage('Invalid display status'),
   async (req, res) => {
     try {
       // Only super users can update status
@@ -521,9 +620,14 @@ router.patch('/:id/status',
 
       submission.status = req.body.status;
       submission.displayStatus = req.body.displayStatus || null;
-      submission.updatedAt = new Date().toISOString();
+      const now = new Date().toISOString();
+      submission.updatedAt = now;
       submission.statusUpdatedBy = req.user.id;
-      submission.statusUpdatedAt = new Date().toISOString();
+      submission.statusUpdatedAt = now;
+      // A curator can jump straight past several stages in one update — every
+      // stage the jump passed through, skipped or landed-on, gets stamped with
+      // this same moment; stages already dated by an earlier update keep theirs.
+      submission.stageTimestamps = recordStageTimestamps(submission, now);
 
       await saveSubmission(req.params.id, submission);
 
@@ -547,120 +651,178 @@ router.patch('/:id/status',
   }
 );
 
+const OVERVIEW_STRING_LIMITS = {
+  paperTitle: 500,
+  studyName: 500,
+  description: 5000,
+  pmid: 500,
+  associatedPaper: 500,
+  journal: 500,
+  authors: 2000,
+  publicationYear: 4,
+  linkToData: 2000,
+  referenceGenome: 200,
+  portalStudyUrl: 2000,
+  datahubReadmeUrl: 2000,
+  rejectionReason: 2000,
+};
+const OVERVIEW_BOOLEAN_FIELDS = new Set([
+  'isLeadAuthor',
+  'accessGranted',
+  'isDataTransformed',
+]);
+const OVERVIEW_FIELDS = new Set([
+  ...Object.keys(OVERVIEW_STRING_LIMITS),
+  ...OVERVIEW_BOOLEAN_FIELDS,
+  'dataTypes',
+  'leadCuratorId',
+]);
+
 /**
- * PATCH /api/submit/:id/curation-notes
- * Update curation team notes
- * Super users only
+ * PATCH /api/submit/:id/overview
+ * Edit overview metadata. Super users only.
  */
-router.patch('/:id/curation-notes',
+router.patch('/:id/overview',
   authenticateToken,
   async (req, res) => {
     try {
       if (req.user.role !== 'super') {
-        return res.status(403).json({ status: 'error', message: 'Only super users can update curation notes' });
-      }
-      const submission = await getSubmission(req.params.id);
-      if (!submission) {
-        return res.status(404).json({ status: 'error', message: 'Submission not found' });
-      }
-      const { curationNotes, action, noteIndex } = req.body;
-
-      // action='append'  → add a new note
-      // action='edit'    → replace note at noteIndex
-      // action='delete'  → remove note at noteIndex
-      // (legacy: no action) → treat as append for backwards compat
-
-      // Migrate legacy single-string curationNotes to array
-      let notes = submission.curationNotesArray || [];
-      if (!notes.length && submission.curationNotes) {
-        notes = [{
-          text: submission.curationNotes,
-          addedAt: submission.curationNotesUpdatedAt || submission.updatedAt || new Date().toISOString(),
-          addedBy: submission.curationNotesUpdatedBy || 'curation team',
-        }];
-      }
-
-      if (action === 'edit' && noteIndex >= 0 && noteIndex < notes.length) {
-        notes[noteIndex] = { ...notes[noteIndex], text: curationNotes, editedAt: new Date().toISOString() };
-      } else if (action === 'delete' && noteIndex >= 0 && noteIndex < notes.length) {
-        notes.splice(noteIndex, 1);
-      } else {
-        // append (default)
-        notes.push({
-          text: curationNotes ?? '',
-          addedAt: new Date().toISOString(),
-          addedBy: req.user.email,
+        return res.status(403).json({
+          status: 'error',
+          message: 'Only super users can edit submission overview details'
         });
       }
 
-      submission.curationNotesArray = notes;
-      // Keep legacy field in sync with latest note for any old readers
-      submission.curationNotes = notes.length ? notes[notes.length - 1].text : '';
-      submission.curationNotesUpdatedAt = new Date().toISOString();
-      submission.curationNotesUpdatedBy = req.user.email;
-      submission.updatedAt = new Date().toISOString();
-
-      await saveSubmission(req.params.id, submission);
-      logger.info(`✅ Curation notes updated: ${req.params.id} (${notes.length} note(s))`);
-      res.json({ status: 'success', message: 'Curation notes updated', data: { curationNotesArray: notes, curationNotes: submission.curationNotes } });
-    } catch (error) {
-      logger.error('Update curation notes error:', error);
-      res.status(500).json({ status: 'error', message: 'Failed to update curation notes' });
-    }
-  }
-);
-
-/**
- * PATCH /api/submit/:id/add-note
- * Submitter appends a note to their submission.
- * Notes are stored in submitterNotes[] with timestamp — separate from curation team notes.
- * Owner only.
- */
-router.patch('/:id/add-note',
-  authenticateToken,
-  async (req, res) => {
-    try {
       const submission = await getSubmission(req.params.id);
       if (!submission) {
-        return res.status(404).json({ status: 'error', message: 'Submission not found' });
+        return res.status(404).json({
+          status: 'error',
+          message: 'Submission not found'
+        });
       }
 
-      if (!isOwnedBy(submission, req.user) && req.user.role !== 'super') {
-        return res.status(403).json({ status: 'error', message: 'Access denied' });
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const unknownFields = Object.keys(body).filter(field => !OVERVIEW_FIELDS.has(field));
+      if (unknownFields.length) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Unsupported overview fields: ${unknownFields.join(', ')}`
+        });
       }
 
-      const { note } = req.body;
-      if (!note?.trim()) {
-        return res.status(400).json({ status: 'error', message: 'Note cannot be empty' });
+      const updates = {};
+      for (const [field, limit] of Object.entries(OVERVIEW_STRING_LIMITS)) {
+        if (!(field in body)) continue;
+        if (body[field] !== null && typeof body[field] !== 'string') {
+          return res.status(400).json({ status: 'error', message: `${field} must be text` });
+        }
+        const value = typeof body[field] === 'string' ? body[field].trim() : '';
+        if (value.length > limit) {
+          return res.status(400).json({
+            status: 'error',
+            message: `${field} must be ${limit} characters or fewer`
+          });
+        }
+        updates[field] = value || null;
       }
 
-      const newNote = {
-        text: note.trim(),
-        addedAt: new Date().toISOString(),
-        addedBy: req.user.email,
-      };
+      for (const field of OVERVIEW_BOOLEAN_FIELDS) {
+        if (!(field in body)) continue;
+        if (body[field] !== null && typeof body[field] !== 'boolean') {
+          return res.status(400).json({ status: 'error', message: `${field} must be true, false, or null` });
+        }
+        updates[field] = body[field];
+      }
 
-      submission.submitterNotes = [...(submission.submitterNotes || []), newNote];
-      submission.updatedAt = new Date().toISOString();
+      if ('dataTypes' in body) {
+        if (!Array.isArray(body.dataTypes) ||
+            body.dataTypes.some(value => typeof value !== 'string' || value.trim().length > 200)) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'dataTypes must be an array of text values'
+          });
+        }
+        updates.dataTypes = body.dataTypes.map(value => value.trim()).filter(Boolean);
+      }
 
+      if ('leadCuratorId' in body) {
+        if (body.leadCuratorId !== null && typeof body.leadCuratorId !== 'string') {
+          return res.status(400).json({
+            status: 'error',
+            message: 'leadCuratorId must be a user ID or null'
+          });
+        }
+        const leadCuratorId = typeof body.leadCuratorId === 'string'
+          ? body.leadCuratorId.trim()
+          : '';
+        if (!leadCuratorId) {
+          updates.leadCuratorId = null;
+          updates.leadCuratorName = null;
+        } else {
+          const curator = await findUserById(leadCuratorId);
+          if (!curator || curator.role !== 'super') {
+            return res.status(400).json({
+              status: 'error',
+              message: 'Lead Curator must be a current curation-team member'
+            });
+          }
+          updates.leadCuratorId = curator.id;
+          updates.leadCuratorName = curator.name || curator.email;
+        }
+      }
+
+      if (!Object.keys(updates).length) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'No editable overview fields were provided'
+        });
+      }
+
+      if (updates.publicationYear && !/^\d{4}$/.test(updates.publicationYear)) {
+        return res.status(400).json({ status: 'error', message: 'Publication year must contain four digits' });
+      }
+      if (updates.portalStudyUrl) {
+        try {
+          const url = new URL(updates.portalStudyUrl);
+          if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Invalid protocol');
+        } catch {
+          return res.status(400).json({
+            status: 'error',
+            message: 'cBioPortal study link must be a valid http or https URL'
+          });
+        }
+      }
+      if (updates.datahubReadmeUrl) {
+        try {
+          const url = new URL(updates.datahubReadmeUrl);
+          if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Invalid protocol');
+        } catch {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Curation & transformation notes link must be a valid http or https URL'
+          });
+        }
+      }
+
+      Object.assign(submission, updates, {
+        updatedAt: new Date().toISOString(),
+        overviewUpdatedBy: req.user.id,
+        overviewUpdatedAt: new Date().toISOString(),
+      });
       await saveSubmission(req.params.id, submission);
 
-      logger.info(`✅ Note added to submission ${req.params.id} by ${req.user.email}`);
-
-      // Notify Slack — only for non-super users (submitter actions)
-      if (req.user.role !== 'super') {
-        const title = submission.studyName || submission.paperTitle || '';
-        notifyNoteAdded(req.params.id, note.trim(), req.user.email, title);
-      }
-
+      logger.info(`✏️ Overview updated: ${req.params.id}`);
       res.json({
         status: 'success',
-        message: 'Note added successfully',
-        data: { note: newNote, totalNotes: submission.submitterNotes.length },
+        message: 'Submission overview updated successfully',
+        data: { submission }
       });
     } catch (error) {
-      logger.error('Add note error:', error);
-      res.status(500).json({ status: 'error', message: 'Failed to add note' });
+      logger.error('Update submission overview error:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to update submission overview'
+      });
     }
   }
 );
@@ -668,7 +830,14 @@ router.patch('/:id/add-note',
 /**
  * DELETE /api/submit/:id
  * Delete a submission
- * Owner or super user only
+ * Super users only.
+ *
+ * Deliberately not the submitter: a submission accumulates curation work —
+ * notes, decisions, a README — that belongs to the curation team rather than to
+ * whoever filed it, and deletion destroys all of it. The tracker has only ever
+ * shown the delete control to super users, but the route itself accepted the
+ * owner too, so the restriction existed in the UI and not at the boundary that
+ * enforces it.
  */
 router.delete('/:id',
   authenticateToken,
@@ -682,11 +851,10 @@ router.delete('/:id',
         });
       }
 
-      // Check permissions
-      if (submission.userId !== req.user.id && req.user.role !== 'super') {
+      if (req.user.role !== 'super') {
         return res.status(403).json({
           status: 'error',
-          message: 'Access denied. You can only delete your own submissions.'
+          message: 'Access denied. Only the curation team can delete a submission.'
         });
       }
 

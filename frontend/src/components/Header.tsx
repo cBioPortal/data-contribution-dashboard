@@ -1,52 +1,39 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { LogIn, Menu, User, ChevronDown, Home } from "lucide-react";
+import { LogIn, Menu, User, ChevronDown, Home, Bell } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { logout as kcLogout } from "@/services/keycloak";
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { API_URL } from "@/config";
-import { authReady } from '@/services/keycloak';
+import { useAuthToken } from '@/hooks/useAuthToken';
+import { fetchProfile } from '@/services/profileApi';
 
 const Header = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [user, setUser] = useState<{ email: string; name: string } | null>(null);
   const isMobile = useIsMobile();
-
-  useEffect(() => {
-    // Wait for Keycloak before deciding whether anyone is signed in.
-    authReady.then(() => {
-    const token = localStorage.getItem('authToken');
-    if (token) {
-      fetch(`${API_URL}/api/auth/profile`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === 'success') {
-          setUser(data.data.user);
-        }
-      })
-      .catch(() => {
-        localStorage.removeItem('authToken');
-      });
-    }
-    });
-  }, []);
+  const token = useAuthToken();
+  const queryClient = useQueryClient();
+  const { data: profile } = useQuery({
+    queryKey: ['profile'],
+    queryFn: () => fetchProfile(token as string),
+    enabled: Boolean(token),
+    refetchInterval: 60_000,
+  });
+  const user = profile?.user ?? null;
+  const unreadCount = profile?.notifications.unreadCount ?? 0;
 
   const toggleMobileMenu = () => {
     setMobileMenuOpen(!mobileMenuOpen);
   };
 
   const handleLogout = () => {
-    setUser(null);
+    queryClient.removeQueries({ queryKey: ['profile'] });
     setMobileMenuOpen(false);
     // Ends the Keycloak SSO session (not just the local token), so the next
     // login actually re-authenticates instead of silently reusing the session.
@@ -97,7 +84,7 @@ const Header = () => {
               </Button>
             </Link>
             
-            {user ? (
+            {token ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button 
@@ -105,11 +92,21 @@ const Header = () => {
                     className="text-sm sm:text-base flex items-center gap-2 px-4"
                   >
                     <User className="h-4 w-4" />
-                    <span className="max-w-[200px] truncate">{user.email}</span>
+                    <span className="max-w-[200px] truncate">{user?.email || 'Account'}</span>
                     <ChevronDown className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem asChild>
+                    <Link to="/profile" className="flex cursor-pointer items-center justify-between">
+                      <span>My profile</span>
+                      {unreadCount > 0 && (
+                        <span className="rounded-full bg-orange-600 px-2 py-0.5 text-xs font-semibold text-white">
+                          {unreadCount}
+                        </span>
+                      )}
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuItem 
                     onClick={handleLogout}
                     className="cursor-pointer text-blue-600 hover:text-blue-700"
@@ -143,12 +140,25 @@ const Header = () => {
               Home
             </Link>
             
-            {user ? (
+            {token ? (
               <>
                 <div className="py-2 px-3 text-sm text-gray-700 bg-gray-50 rounded-md flex items-center gap-2">
                   <User className="h-4 w-4" />
-                  <span className="truncate">{user.email}</span>
+                  <span className="truncate">{user?.email || 'Account'}</span>
                 </div>
+                <Link
+                  to="/profile"
+                  className="flex items-center justify-between py-2 text-gray-600 hover:text-blue-600 transition-colors font-medium"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <span>My profile</span>
+                  {unreadCount > 0 && (
+                    <span className="flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs text-orange-800">
+                      <Bell className="h-3 w-3" />
+                      {unreadCount}
+                    </span>
+                  )}
+                </Link>
                 <Button 
                   variant="outline" 
                   onClick={handleLogout}

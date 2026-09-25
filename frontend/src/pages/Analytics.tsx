@@ -9,7 +9,8 @@ import {
   fetchStudiesCount,
   fetchCancerTypeSamples,
   fetchCumulativeGrowth,
-  fetchSampleCountsByDataType
+  fetchSampleCountsByDataType,
+  fetchCommunityContributions,
 } from "@/services/cbioportalApi";
 import { parseIssuesData, parsePullRequestsData } from "@/utils/dataParser";
 import {
@@ -27,6 +28,13 @@ import NewDataReleaseChart from "@/components/analytics/NewDataReleaseChart";
 import PipelineFunnelChart from "@/components/analytics/PipelineFunnelChart";
 import SubmissionVolumeChart from "@/components/analytics/SubmissionVolumeChart";
 import SubmissionMixChart from "@/components/analytics/SubmissionMixChart";
+import CommunityCurationStats from "@/components/analytics/CommunityCurationStats";
+
+/**
+ * The community curation section is paused for now — not removed, just hidden.
+ * Flip this back to `true` to bring it back; nothing else needs to change.
+ */
+const SHOW_COMMUNITY_CURATION_STATS = false;
 
 // Import tracker data (still used for cumulative growth)
 import issuesData from "@/data/issues.txt?raw";
@@ -73,6 +81,14 @@ const Analytics = () => {
     queryFn: () => fetchSampleCountsByDataType(selectedYear),
   });
   const { data: cumulativeGrowthRows = [] } = useQuery({ queryKey: ['cumulative-growth'], queryFn: fetchCumulativeGrowth });
+  const {
+    data: contributionMetrics = { completedCurations: 0, contributors: 0, monthlyTrend: [] },
+    isLoading: contributionsLoading,
+  } = useQuery({
+    queryKey: ['community-contributions'],
+    queryFn: fetchCommunityContributions,
+    enabled: SHOW_COMMUNITY_CURATION_STATS,
+  });
 
   useEffect(() => {
     if (studiesError) {
@@ -166,6 +182,15 @@ const Analytics = () => {
             <SubmissionVolumeChart />
             <SubmissionMixChart />
           </div>
+
+          {SHOW_COMMUNITY_CURATION_STATS && (
+            <CommunityCurationStats
+              completedCurations={contributionMetrics.completedCurations}
+              contributors={contributionMetrics.contributors}
+              monthlyTrend={contributionMetrics.monthlyTrend}
+              isLoading={contributionsLoading}
+            />
+          )}
 
         </div>
       </div>

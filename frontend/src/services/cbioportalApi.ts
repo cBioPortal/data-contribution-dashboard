@@ -98,6 +98,16 @@ export const fetchPipelineFunnel = async () => {
   return (await r.json()).data;
 };
 
+export const fetchCommunityContributions = async (): Promise<{
+  completedCurations: number;
+  contributors: number;
+  monthlyTrend: Array<{ month: string; completedCurations: number }>;
+}> => {
+  const r = await fetch(`${API_URL}/api/analytics/community-contributions`);
+  if (!r.ok) throw new Error('Failed to fetch community contribution metrics');
+  return (await r.json()).data;
+};
+
 export const fetchSubmissionVolume = async () => {
   const r = await fetch(`${API_URL}/api/analytics/submissions/volume-over-time`);
   if (!r.ok) throw new Error('Failed to fetch submission volume');
@@ -116,4 +126,3 @@ export const fetchSubmissionMix = async (): Promise<SubmissionMix> => {
   if (!r.ok) throw new Error('Failed to fetch submission mix');
   return (await r.json()).data;
 };
-

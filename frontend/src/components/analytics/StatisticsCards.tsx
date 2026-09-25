@@ -15,12 +15,10 @@ const StatisticsCards: React.FC<StatisticsCardsProps> = ({
   totalSamples,
   totalCancerTypes,
   lastUpdated,
-  isLoading
+  isLoading,
 }) => {
   return (
-    <>
-      {/* Platform Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
         <Card className="bg-white shadow-md border border-slate-100">
           <CardContent className="p-8">
             <div>
@@ -65,7 +63,6 @@ const StatisticsCards: React.FC<StatisticsCardsProps> = ({
           </CardContent>
         </Card>
       </div>
-    </>
   );
 };
 

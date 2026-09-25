@@ -10,12 +10,12 @@ import { fetchPipelineFunnel } from '@/services/cbioportalApi';
 const STAGE_COLORS: Record<string, string> = {
   'Submitted':             '#7570b3',
   'Initial Review':        '#1b9e77',
-  'Approved for Portal':   '#66a61e',
+  'Approved for Curation': '#66a61e',
   'Curation in Progress':  '#d95f02',
   'Final Review':          '#e6ab02',
   'Preparing for Release': '#a6761d',
   'Released':              '#2986E2',
-  'Not Curatable':         '#999999',
+  'Rejected':              '#999999',
 };
 
 const CustomTooltip = ({ active, payload }: any) => {
@@ -37,10 +37,10 @@ const PipelineFunnelChart: React.FC = () => {
 
   const total = data.reduce((s: number, d: any) => s + d.count, 0);
 
-  // Order: pipeline steps first, Not Curatable last
+  // Order: pipeline steps first, Rejected last
   const ordered = [
-    ...data.filter((d: any) => d.stage !== 'Not Curatable'),
-    ...data.filter((d: any) => d.stage === 'Not Curatable'),
+    ...data.filter((d: any) => d.stage !== 'Rejected'),
+    ...data.filter((d: any) => d.stage === 'Rejected'),
   ];
 
   return (

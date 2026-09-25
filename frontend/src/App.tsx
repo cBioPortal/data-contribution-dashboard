@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import ProtectedRoute from "./components/ProtectedRoute";
+import SharedLayout from "./components/SharedLayout";
 
 // The landing route ships in the entry chunk. Splitting it out meant the browser
 // had to fetch a second chunk after parsing the entry, and the Suspense fallback
@@ -21,7 +22,11 @@ import Login from "./pages/Login";
 const SubmitContent = lazy(() => import("./pages/SubmitContent"));
 const TrackStatus = lazy(() => import("./pages/TrackStatus"));
 const Analytics = lazy(() => import("./pages/Analytics"));
+const Profile = lazy(() => import("./pages/Profile"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+// One study's curation record at its own URL, so it can be cited from a paper,
+// an email or DataHub rather than only reached by expanding a grid row.
+const StudyRecord = lazy(() => import("./pages/StudyRecord"));
 
 const queryClient = new QueryClient();
 
@@ -31,9 +36,14 @@ const App: React.FC = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        {/* Route chunks resolve in milliseconds off a warm cache; the blank
-            fallback avoids a spinner flashing on every navigation. */}
-        <Suspense fallback={<div style={{ minHeight: "100vh" }} />}>
+        {/* The shell, not a spinner and not a blank page. Header and Footer are
+            already in the entry chunk, so on a cold load of a heavy route they
+            can paint while its chunk is still downloading — on /track-status
+            that is ~0.5s during which the page used to be white for no reason.
+            On in-app navigation this keeps the header and footer in place
+            instead of flashing the viewport, which is what the blank fallback
+            was originally reaching for. */}
+        <Suspense fallback={<SharedLayout><div style={{ minHeight: "60vh" }} /></SharedLayout>}>
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/login" element={<Login />} />
@@ -50,6 +60,15 @@ const App: React.FC = () => (
           
           <Route path="/track-status" element={<TrackStatus />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <Profile />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/study/:id" element={<StudyRecord />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
